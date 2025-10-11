@@ -1,8 +1,9 @@
 import { Plugin } from "obsidian";
+import { AutoTagger } from "./services/autoTagger";
 import {
 	DEFAULT_SETTINGS,
-	type PersonalContextSettings,
 	PersonalContextSettingTab,
+	type PersonalContextSettings,
 } from "./settings";
 import { toggleLoggerBy } from "./utils/logger";
 import { SvelteView, VIEW_TYPE } from "./view/view";
@@ -81,5 +82,16 @@ export default class MyPlugin extends Plugin {
 
 	async saveSettings() {
 		await this.saveData(this.settings);
+	}
+
+	/**
+	 * AutoTaggerインスタンスを作成（テスト用）
+	 */
+	createAutoTagger(): AutoTagger {
+		return new AutoTagger(
+			this.app,
+			this.settings.autoTagger,
+			this.settings.common,
+		);
 	}
 }

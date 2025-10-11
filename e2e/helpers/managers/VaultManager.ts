@@ -1,4 +1,4 @@
-// E:\Desktop\coding\pub\obsidian-sandbox-note\src\e2e\obsidian-setup\vault-manager.mts
+// E:\Desktop\coding\my-projects-02\obsidian-auto-tagger\e2e\helpers\managers\VaultManager.ts
 // ===================================================================
 // vault-manager.mts - Vault操作の管理
 // ===================================================================
@@ -13,7 +13,7 @@ import path from "path";
 import type { ElectronApplication, Page } from "playwright";
 import { SANDBOX_VAULT_NAME } from "../../constants";
 import { IPCBridge } from "../IPCBridge";
-import type { VaultOptions } from "../types";
+import type { TestPlugin, VaultOptions } from "../types";
 import { PageManager } from "./PageManager";
 import { PluginManager } from "./PluginManager";
 
@@ -31,82 +31,104 @@ export class VaultManager {
 		this.pluginManager = new PluginManager();
 	}
 
-	async openVault(options: VaultOptions = {}): Promise<Page> {
-		logger.debug("open vault", options);
+	/**
+	 * 指定されたオプションに基づいてVaultを開き、ページとVaultのパスを返します。
+	 * このメソッドはプラグインのセットアップを行いません。
+	 * @param options Vaultを開く際のオプション
+	 * @returns 操作可能になったVaultのページと、そのVaultのファイルシステムパス
+	 */
+	async openVault(
+		options: VaultOptions = {},
+	): Promise<{page: Page, vaultPath: string}> {
+		logger.debug("Opening vault with options:", options);
 
-		let vaultPath: string;
-		let newPage: Page;
-		let shouldReload = false;
+		// ステップ 1: Vaultのパスを決定する
+		const vaultPath = await this._determineVaultPath(options);
 
-		// --- Step 1: Open Vault (Sandbox or Normal) ---
-		// 並列実行時は常に通常のvaultを使用（sandboxは同じパスを返すため）
-		const shouldUseSandbox = options.useSandbox && !process.env.CI;
+		// ステップ 2: Vaultウィンドウを開く
+		const page = await this._openVaultWindow(vaultPath, options);
 
-		if (shouldUseSandbox) {
-			logger.debug(chalk.green("Opening sandbox vault..."));
-			newPage = await this.pageManager.executeActionAndWaitForNewWindow(
-				() => this.ipc.openSandbox(),
-				this.pageManager.waitForVaultReady,
-			);
-			vaultPath = await this.ipc.getSandboxPath();
-			logger.debug(chalk.green("Sandbox vault opened at:", vaultPath));
-		} else {
-			logger.debug("Opening normal vault...");
-			if (options.vaultPath) {
-				vaultPath = options.vaultPath;
-			} else if (options.name) {
-				vaultPath = await this.getVaultPath(options.name);
-			} else {
-				logger.debug(
-					"options.name and options.path not specified, create temp dir",
-				);
-				vaultPath = await fs.mkdtemp(path.join(os.tmpdir(), "obsidian-e2e-"));
-				logger.debug("temp dir created:", vaultPath);
-			}
-
-			if (options.forceNewVault && existsSync(vaultPath)) {
-				rmSync(vaultPath, { recursive: true });
-			}
-
-			newPage = await this.pageManager.executeActionAndWaitForNewWindow(
-				async () => {
-					const result = await this.ipc.openVault(
-						vaultPath,
-						options.forceNewVault,
-					);
-					if (result !== true) {
-						throw new Error(`Failed to open vault: ${result}`);
-					}
-				},
-				this.pageManager.waitForVaultReady,
-			);
-			logger.debug("Normal vault opened:", vaultPath);
-		}
-
-		// --- Step 2: Install and Enable Plugins (if specified) ---
-		if (options.plugins && options.plugins.length > 0) {
-			logger.debug("Installing plugins...");
-			await this.pluginManager.installPlugins(vaultPath, options.plugins);
-			logger.debug("Plugins installed.");
-
-			logger.debug("Enabling plugins...");
-			await this.pluginManager.enablePlugins(
-				this.app,
-				newPage,
-				options.plugins.map((p) => p.pluginId),
-			);
-			logger.debug("Plugins enabled.");
-
-			// --- Step 3: Reload Vault once after all plugin changes ---
-			logger.debug(chalk.blue("Reloading vault to apply plugin changes..."));
-			await newPage.reload();
-			await this.pageManager.waitForVaultReady(newPage);
-			logger.debug(chalk.blue("Vault reloaded."));
-		}
-
-		return newPage;
+		logger.debug(chalk.green(`Vault window is open for: ${vaultPath}`));
+		return {page, vaultPath};
 	}
 
+	/**
+	 * 指定されたVaultにプラグインをインストールし、有効化し、Vaultをリロードします。
+	 * @param page プラグインをセットアップする対象のページ
+	 * @param vaultPath プラグインをインストールするVaultのパス
+	 * @param plugins インストールするプラグインのリスト
+	 */
+	public async setupPlugins(
+		page: Page,
+		vaultPath: string,
+		plugins: TestPlugin[] = [],
+	): Promise<void> {
+		if (plugins.length === 0) {
+			logger.debug("No plugins specified to set up.");
+			return;
+		}
+
+		logger.debug("Setting up plugins...");
+		await this.pluginManager.installPlugins(vaultPath, plugins);
+
+		await this.pluginManager.enablePlugins(
+			this.app,
+			page,
+			plugins.map((p) => p.pluginId),
+		);
+
+		logger.debug(chalk.blue("Reloading vault to apply plugin changes..."));
+		await page.reload();
+		await this.pageManager.waitForPage(page);
+		logger.debug(chalk.blue("Vault reloaded successfully."));
+	}
+
+	/**
+	 * Vaultのパスを決定します。サンドボックス、指定パス、名前付き、一時的Vaultの順で解決します。
+	 */
+	private async _determineVaultPath(options: VaultOptions): Promise<string> {
+		const shouldUseSandbox = !!options.useSandbox && !process.env.CI;
+		if (shouldUseSandbox) {
+			return this.ipc.getSandboxPath();
+		}
+		if (options.vaultPath) {
+			return options.vaultPath;
+		}
+		if (options.name) {
+			return this.getVaultPath(options.name);
+		}
+		const tempPath = await fs.mkdtemp(path.join(os.tmpdir(), "obsidian-e2e-"));
+		logger.debug("Created temporary vault at:", tempPath);
+		return tempPath;
+	}
+
+	/**
+	 * 実際にVaultを開くアクションを実行し、新しいページを返します。
+	 */
+	private async _openVaultWindow(
+		vaultPath: string,
+		options: VaultOptions,
+	): Promise<Page> {
+		const shouldUseSandbox = !!options.useSandbox && !process.env.CI;
+		const action = shouldUseSandbox
+			? () => this.ipc.openSandbox()
+			: () => this.ipc.openVault(vaultPath, options.forceNewVault);
+
+		if (options.forceNewVault && existsSync(vaultPath)) {
+			logger.debug(`Forcing new vault, removing existing at: ${vaultPath}`);
+			rmSync(vaultPath, { recursive: true, force: true });
+		}
+
+		logger.debug(`Executing action to open vault at: ${vaultPath}`);
+		return this.pageManager.executeActionAndWaitForNewWindow(
+			action as any,
+			(page) => this.pageManager.waitForPage(page),
+		);
+	}
+
+	/**
+	 * Obsidianのユーザーデータをクリアします。テスト間のクリーンアップに使用します。
+	 */
 	static async clearData(
 		electronApp: ElectronApplication,
 		page?: Page,
@@ -117,22 +139,18 @@ export class VaultManager {
 		[
 			path.join(userDataDir, "obsidian.json"),
 			path.join(userDataDir, SANDBOX_VAULT_NAME),
-		].forEach((path) => {
-			logger.debug("delete", path);
-			rmSync(path, { force: true, recursive: true });
+		].forEach((p) => {
+			logger.debug("Deleting path:", p);
+			rmSync(p, { force: true, recursive: true });
 		});
 
-		const [win] = [page ?? electronApp.windows()[0]];
+		const win = page ?? electronApp.windows()[0];
 		if (win) {
-			logger.log(chalk.magenta("clearing..."));
+			logger.log(chalk.magenta("Clearing browser storage..."));
 			const success = await win.evaluate(async () => {
-				const webContents =
-					// @ts-expect-error
-					window.electron.remote.BrowserWindow.getFocusedWindow()
-						?.webContents as WebContents;
-				if (!webContents) {
-					return false;
-				}
+				const webContents = (window as any).electron.remote.BrowserWindow.getFocusedWindow()?.webContents as WebContents;
+				if (!webContents) return false;
+
 				webContents.session.flushStorageData();
 				await webContents.session.clearStorageData({
 					storages: ["indexdb", "localstorage", "websql"],
@@ -140,53 +158,36 @@ export class VaultManager {
 				await webContents.session.clearCache();
 				return true;
 			});
-			if (success) {
-				logger.log(chalk.magenta("localStorage cleared."));
-			} else {
-				logger.log(chalk.red("failed to clear localStorage"));
-			}
+			logger.log(
+				success
+					? chalk.magenta("Browser storage cleared.")
+					: chalk.red("Failed to clear browser storage."),
+			);
 		} else {
-			logger.log(chalk.red("window not found"));
+			logger.log(chalk.red("Window not found for storage clearing."));
 		}
 	}
 
+	/**
+	 * Obsidianのスターター（ランチャー）画面を開きます。
+	 */
 	async openStarter(): Promise<Page> {
-		const newPage = await this.pageManager.executeActionAndWaitForNewWindow(
-			async () => {
-				await this.ipc.openStarter();
-			},
-			this.pageManager.waitForStarterReady,
+		logger.debug("Opening starter window...");
+		return this.pageManager.executeActionAndWaitForNewWindow(
+			() => this.ipc.openStarter(),
+			(page) => this.pageManager.waitForPage(page),
 		);
-
-		await this.pageManager.waitForStarterReady(newPage);
-		return newPage;
 	}
 
-	private async getUserDataPath() {
+	private async getUserDataPath(): Promise<string> {
 		const page = await this.pageManager.ensureSingleWindow();
-		const userDataDir = await page.evaluate(() => {
-			const app = (window as any).app;
-			if (app?.vault?.adapter?.basePath) {
-				const currentPath = app.vault.adapter.basePath;
-				return currentPath;
-			}
-			throw new Error("failed to get user data path");
-		});
-		return path.dirname(userDataDir);
+		return page.evaluate(() => (window as any).app.getPath("userData"));
 	}
 
 	private async getVaultPath(name: string): Promise<string> {
 		const userDataDir = await this.getUserDataPath();
-		logger.debug("userDataDir", userDataDir);
-
-		if (userDataDir) {
-			return path.join(userDataDir, name);
-		}
-
-		return path.join(
-			process.env.USERPROFILE || process.env.HOME || "",
-			"ObsidianVaults",
-			name,
-		);
+		// ObsidianのVaultは通常、ユーザーデータディレクトリの親ディレクトリに保存される
+		const vaultsDir = path.dirname(userDataDir);
+		return path.join(vaultsDir, name);
 	}
 }

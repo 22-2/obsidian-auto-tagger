@@ -1,140 +1,128 @@
+// E:\Desktop\coding\my-projects-02\obsidian-auto-tagger\e2e\setup\ObsidianTestSetup.ts
 // ===================================================================
-// setup.mts - メインのセットアップクラス
+// ObsidianTestSetup.ts - メインのセットアップクラス
 // ===================================================================
 
-import { type VaultOptions } from "e2e/helpers/types";
 import fs from "fs/promises";
 import log from "loglevel";
 import os from "os";
 import path from "path";
-import type { ElectronApplication } from "playwright";
-import { _electron as electron } from "playwright/test";
+import type { ElectronApplication, Page } from "playwright";
+import { _electron as electron } from "playwright";
+import invariant from "tiny-invariant";
+
 import { LAUNCH_OPTIONS } from "../constants";
 import { PageManager } from "../helpers/managers/PageManager";
 import { VaultManager } from "../helpers/managers/VaultManager";
-import type { TestContext, VaultPageTextContext } from "../helpers/types";
+import type { TestContext, TestPlugin, VaultOptions } from "../helpers/types";
 import { getPluginHandleMap } from "../helpers/utils";
 
 const logger = log.getLogger("ObsidianTestSetup");
 
 export class ObsidianTestSetup {
 	private electronApp?: ElectronApplication;
-	// private currentPage?: Page;
 	private vaultManager?: VaultManager;
 	private pageManager?: PageManager;
 	private tempUserDataDir?: string;
 
+	/**
+	 * Obsidianアプリケーションを起動し、テストの準備を整えます。
+	 * 一時的なユーザーデータディレクトリを作成し、アプリケーションをクリーンな状態で起動します。
+	 */
 	async launch(): Promise<void> {
 		this.tempUserDataDir = await fs.mkdtemp(
 			path.join(os.tmpdir(), "obsidian-e2e-"),
 		);
 		logger.debug(`Using temporary user data dir: ${this.tempUserDataDir}`);
+
 		const launchOptions = {
 			...LAUNCH_OPTIONS,
-			// Electronアプリの起動引数に --user-data-dir を追加
 			args: [...LAUNCH_OPTIONS.args, `--user-data-dir=${this.tempUserDataDir}`],
-			// Set environment variable for Playwright detection
 			env: {
 				...process.env,
 				PLAYWRIGHT: "true",
 				CI: process.env.CI || "false",
 			},
 		};
-		this.electronApp = await electron.launch(launchOptions);
-		let page = await this.electronApp.waitForEvent("window");
 
-		// Set Playwright marker in window context immediately
-		await page.evaluate(() => {
-			(window as any).playwright = true;
-		});
+		this.electronApp = await electron.launch(launchOptions);
+		const initialPage = await this.electronApp.waitForEvent("window");
+
+		// Playwrightで実行中であることをウィンドウコンテキストに設定
+		await initialPage.evaluate(() => ((window as any).playwright = true));
 
 		this.pageManager = new PageManager(this.electronApp);
-		logger.debug("enable obsidian debug mode");
-		await this.pageManager.waitForPage(page);
-		logger.debug("starter ready");
+		this.vaultManager = new VaultManager(this.electronApp, this.pageManager);
 
-		// Clear data only once at startup
-		await VaultManager.clearData(this.electronApp);
-		await page.reload({ waitUntil: "domcontentloaded" });
+		// 起動直後のデータクリアとリロード
+		await this.pageManager.waitForPage(initialPage);
+		await VaultManager.clearData(this.electronApp, initialPage);
+		await initialPage.reload({ waitUntil: "domcontentloaded" });
 
 		const currentPage = await this.pageManager.ensureSingleWindow();
-		await this.pageManager.waitForStarterReady(currentPage);
-		logger.debug("init start page");
-
-		this.vaultManager = new VaultManager(this.electronApp, this.pageManager);
+		await this.pageManager.waitForPage(currentPage);
+		logger.debug("Initial setup complete. Obsidian starter page is ready.");
 	}
 
-	async openVault(options: VaultOptions = {}): Promise<VaultPageTextContext> {
-		if (!this.electronApp || !this.vaultManager) {
-			throw new Error("Setup not initialized. Call launch() first.");
-		}
-
-		let page = await this.vaultManager.openVault(options);
-
-		const vaultName = await page.evaluate(() => app?.vault?.getName());
-
-		const pluginHandleMap = await getPluginHandleMap(
-			page,
-			options.plugins || [],
-		);
-
-		// const pluginHandleMap = await page.evaluateHandle((plugins) => {
-		// 	const map = new Map<string, Plugin>();
-		// 	plugins.forEach((p) => {
-		// 		map.set(p.pluginId, app?.plugins.getPlugin(p.pluginId)!);
-		// 	});
-		// 	return map;
-		// }, options.plugins || []);
-
-		// page = await this.pageManager!.executeActionAndWaitForNewWindow(
-		// 	async () => {
-		// 		const page = await this.pageManager!.ensureSingleWindow();
-		// 		await page?.evaluate(() => app.debugMode(true));
-		// 	}
-		// );
-
-		return {
-			electronApp: this.electronApp,
-			window: page,
-			pluginHandleMap,
-			vaultName,
-		};
+	/**
+	 * 指定されたオプションでVaultを開きます。
+	 * @returns Vaultのページオブジェクトとファイルシステムパス
+	 */
+	async openVault(
+		options: VaultOptions = {},
+	): Promise<{ page: Page; vaultPath: string }> {
+		invariant(this.vaultManager, "VaultManager not initialized. Call launch() first.");
+		return this.vaultManager.openVault(options);
 	}
 
-	async openSandbox(options: VaultOptions = {}): Promise<VaultPageTextContext> {
-		return this.openVault({
-			...options,
-			useSandbox: true,
-		});
+	/**
+	 * 指定されたVaultにプラグインをインストールし、有効化します。
+	 */
+	async setupPlugins(
+		page: Page,
+		vaultPath: string,
+		plugins: TestPlugin[] = [],
+	): Promise<void> {
+		invariant(this.vaultManager, "VaultManager not initialized. Call launch() first.");
+		await this.vaultManager.setupPlugins(page, vaultPath, plugins);
 	}
 
+	/**
+	 * プラグインIDとプラグインインスタンスのマップ（JSHandle）を取得します。
+	 */
+	async getPluginHandles(page: Page, plugins: TestPlugin[] = []) {
+		return getPluginHandleMap(page, plugins);
+	}
+
+	/**
+	 * Obsidianのスターター画面を開きます。
+	 */
 	async openStarter(): Promise<TestContext> {
-		if (!this.electronApp || !this.vaultManager) {
-			throw new Error("Setup not initialized. Call launch() first.");
-		}
-
+		invariant(
+			this.electronApp && this.vaultManager,
+			"Setup not initialized. Call launch() first.",
+		);
 		const page = await this.vaultManager.openStarter();
-
-		return {
-			electronApp: this.electronApp,
-			window: page,
-		};
+		return { electronApp: this.electronApp, window: page };
 	}
 
+	/**
+	 * アプリケーションを終了し、一時ファイルをクリーンアップします。
+	 */
 	async cleanup(): Promise<void> {
 		if (this.electronApp) {
-			await Promise.all(this.electronApp.windows().map((win) => win.close()));
-			await this.electronApp.close();
+			await this.electronApp.close().catch((err) => {
+				logger.error("Error closing electron app:", err);
+			});
 		}
 		if (this.tempUserDataDir) {
 			logger.debug(`Removing temp user data dir: ${this.tempUserDataDir}`);
-			// recursive: true (再帰的削除), force: true (ロックされていても強制削除)
 			await fs.rm(this.tempUserDataDir, { recursive: true, force: true });
 		}
-		logger.debug("[ObsidianTestSetup] cleaned All");
+		logger.debug("ObsidianTestSetup cleanup complete.");
 	}
 
-	getCurrentPage() {
+	getCurrentPage(): Page | undefined {
 		return this.electronApp?.windows()[0];
 	}
 }

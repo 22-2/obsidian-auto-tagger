@@ -1,3 +1,4 @@
+// E:\Desktop\coding\my-projects-02\obsidian-auto-tagger\e2e\helpers\managers\PluginManager.ts
 // ===================================================================
 // plugin-manager.mts - プラグイン管理
 // ===================================================================
@@ -18,217 +19,139 @@ import type { TestPlugin } from "../types";
 const logger = log.getLogger("PluginManager");
 
 export class PluginManager {
+	/**
+	 * 指定されたプラグインをVaultにインストールします。
+	 * @param vaultPath Vaultのパス
+	 * @param plugins インストールするプラグインのリスト
+	 */
 	async installPlugins(
 		vaultPath: string,
-		pluginPaths: TestPlugin[],
+		plugins: TestPlugin[],
 	): Promise<void> {
-		const obsidianDir = path.join(vaultPath, ".obsidian");
-		const pluginsDir = path.join(obsidianDir, "plugins");
-		logger.debug("obsidianDir", obsidianDir);
-		logger.debug("pluginPaths", pluginPaths);
+		const pluginsDir = path.join(vaultPath, ".obsidian", "plugins");
+		logger.debug("Plugins directory:", pluginsDir);
+		logger.debug(
+			"Plugins to install:",
+			plugins.map((p) => p.pluginId),
+		);
 
-		// .obsidian ディレクトリを作成
-		if (!existsSync(obsidianDir)) {
-			mkdirSync(obsidianDir, { recursive: true });
-		}
-
-		if (!existsSync(pluginsDir)) {
-			mkdirSync(pluginsDir, { recursive: true });
-		}
+		mkdirSync(pluginsDir, { recursive: true });
 
 		const installedIds: string[] = [];
 
-		for (const { path: pluginPath, pluginId } of pluginPaths) {
-			if (!existsSync(pluginPath)) {
-				console.warn(`Plugin path not found: ${pluginPath}`);
-				continue;
-			}
-
-			if (!existsSync(path.join(pluginPath, "manifest.json"))) {
-				console.warn(`manifest.json not found in: ${pluginPath}`);
+		for (const { path: pluginPath, pluginId } of plugins) {
+			if (!existsSync(pluginPath) || !existsSync(path.join(pluginPath, "manifest.json"))) {
+				logger.warn(`Plugin source not found or invalid: ${pluginPath}`);
 				continue;
 			}
 
 			const destDir = path.join(pluginsDir, pluginId);
-
-			if (!existsSync(destDir)) {
-				mkdirSync(destDir, { recursive: true });
-			}
+			mkdirSync(destDir, { recursive: true });
 
 			// プラグインファイルをコピー
 			for (const file of readdirSync(pluginPath)) {
-				const srcFile = path.join(pluginPath, file);
-				const destFile = path.join(destDir, file);
-				copyFileSync(srcFile, destFile);
-				logger.debug(`Copied: ${file} to ${destDir}`);
+				copyFileSync(path.join(pluginPath, file), path.join(destDir, file));
 			}
+			logger.debug(`Copied plugin files for: ${pluginId}`);
 
 			installedIds.push(pluginId);
-			logger.debug(`Installed plugin: ${pluginId}`);
 		}
 
-		// community-plugins.json を書き込み
-		const pluginsJsonPath = path.join(obsidianDir, "community-plugins.json");
+		// community-plugins.json を書き込み、Obsidianにインストール済みプラグインを認識させる
+		const pluginsJsonPath = path.join(
+			vaultPath,
+			".obsidian",
+			"community-plugins.json",
+		);
 		writeFileSync(pluginsJsonPath, JSON.stringify(installedIds));
-		logger.debug(`Installed plugins: ${installedIds.join(", ")}`);
+		logger.debug(`Wrote community-plugins.json with: ${installedIds.join(", ")}`);
 	}
 
+	/**
+	 * 指定されたプラグインIDのプラグインを有効化します。
+	 * 事前にRestricted Modeを無効化します。
+	 * @param app ElectronApplicationインスタンス
+	 * @param page 現在のページ
+	 * @param pluginIds 有効化するプラグインIDの配列
+	 */
 	public async enablePlugins(
 		app: ElectronApplication,
 		page: Page,
 		pluginIds: string[],
 	): Promise<void> {
-		const pluginManager = new PluginManager();
-
-		// Restricted Mode を無効化
-		await pluginManager.disableRestrictedMode(page, app);
-
-		// const pluginIds = plugins.map((p) => {
-		// 	const manifestPath = path.join(p, "manifest.json");
-		// 	if (!existsSync(manifestPath)) {
-		// 		throw new Error(`manifest.json not found in ${p}`);
-		// 	}
-		// 	const manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
-		// 	return manifest.id;
-		// });
+		await this.disableRestrictedMode(page);
 
 		const enabledIds = await page.evaluate(async (ids) => {
 			const app = (window as any).app;
 			const enabled: string[] = [];
-
 			for (const id of ids) {
 				await app.plugins.enablePluginAndSave(id);
 				enabled.push(id);
 			}
-
 			return enabled;
 		}, pluginIds);
 
 		logger.debug(`Enabled plugins: ${enabledIds.join(", ")}`);
 	}
 
-	async disableRestrictedMode(
-		page: Page,
-		app: ElectronApplication,
-	): Promise<void> {
-		// Wait for app.plugins to be available
-		await page.waitForFunction(
-			() => {
-				const app = (window as any).app;
-				return app?.plugins?.isEnabled !== undefined;
-			},
-			{ timeout: 10000 },
-		);
+	/**
+	 * Restricted Modeを無効化し、コミュニティプラグインを有効にします。
+	 * UI操作を伴うため、不安定にならないよう宣言的な待機処理を使用します。
+	 */
+	async disableRestrictedMode(page: Page): Promise<void> {
+		await page.waitForFunction(() => (window as any).app?.plugins?.isEnabled);
 
 		if (await this.checkIsCommunityPluginEnabled(page)) {
 			logger.debug("Community plugins are already enabled.");
 			return;
 		}
 
-		logger.debug("Attempting to enable community plugins...");
+		logger.debug("Attempting to enable community plugins via settings UI...");
 
-		// 設定タブを開く
+		// 1. 設定画面を開き、「Community plugins」タブに移動
 		await page.evaluate(() => {
-			(window as any).app.setting.open();
-			(window as any).app.setting.openTabById("community-plugins");
-		});
-
-		// ヘルパー関数: 現在表示されているボタンのテキストを取得
-		const getButtonText = () =>
-			page.evaluate(() => {
-				const button = (
-					window as any
-				).app.setting.activeTab?.setting?.contentEl?.querySelector(
-					"button.mod-cta", // より具体的なセレクタに変更
-				) as HTMLElement | null;
-				return button?.textContent?.trim() || null;
-			});
-
-		// ヘルパー関数: ボタンをクリック
-		const clickButton = () =>
-			page.evaluate(() => {
-				const button = (
-					window as any
-				).app.setting.activeTab?.setting?.contentEl?.querySelector(
-					"button.mod-cta",
-				) as HTMLElement | null;
-				button?.click();
-			});
-
-		let buttonText = await getButtonText();
-		logger.debug(`Initial button text in settings: "${buttonText}"`);
-
-		// [ステップ1] "Turn on and reload" ボタンがあればクリック
-		if (buttonText === "Turn on and reload") {
-			logger.debug("Clicking 'Turn on and reload'...");
-			await clickButton();
-			// UIが更新されるのを待機
-			await page.waitForTimeout(1000);
-			// ボタンのテキストを再取得
-			buttonText = await getButtonText();
-			logger.debug(`Button text after first click: "${buttonText}"`);
-		}
-
-		// [ステップ2] "Turn on community plugins" ボタンがあればクリック
-		if (buttonText === "Turn on community plugins") {
-			logger.debug("Clicking 'Turn on community plugins'...");
-			await clickButton();
-			await page.waitForTimeout(1000);
-		}
-
-		// 設定を閉じる
-		await page.keyboard.press("Escape");
-		logger.debug("Community plugins should now be enabled.");
-
-		// 最終確認
-		expect(
-			await this.checkIsCommunityPluginEnabled(page),
-			"Failed to enable community plugins.",
-		).toBe(true);
-	}
-
-	private async clickSettingsButton(page: Page): Promise<string | null> {
-		return page.evaluate(() => {
-			(window as any).app.setting.open();
-			(window as any).app.setting.openTabById("community-plugins");
 			const app = (window as any).app;
-			const button = app.setting.activeTab?.setting?.contentEl?.querySelector(
-				"button",
-			) as HTMLElement | null;
-			if (button) {
-				const text = button.textContent as string;
-				button.click();
-				return text;
-			}
-			return null;
+			app.setting.open();
+			app.setting.openTabById("community-plugins");
 		});
-	}
 
-	// async enablePlugins(page: Page, pluginIds: string[]): Promise<void> {
-	// 	const enabledIds = await page.evaluate(async (ids) => {
-	// 		const app = (window as any).app;
-	// 		const enabled: string[] = [];
-
-	// 		for (const id of ids) {
-	// 			await app.plugins.enablePluginAndSave(id);
-	// 			enabled.push(id);
-	// 		}
-
-	// 		return enabled;
-	// 	}, pluginIds);
-
-	// 	logger.debug(`Enabled plugins: ${enabledIds.join(", ")}`);
-	// }
-
-	async checkIsCommunityPluginEnabled(page: Page): Promise<boolean> {
-		const isEnabled = await page.evaluate(() => {
-			const app = (window as any).app;
-			return app?.plugins?.isEnabled?.() ?? false;
-		});
-		logger.debug(
-			`${isEnabled ? "✅️" : "❌️"} checkIsCommunityPluginEnabled`,
-			page.url(),
+		// 2. 「Turn on community plugins」ボタンを探してクリック
+		const settingsContent = page.locator(
+			".vertical-tab-content",
 		);
-		return isEnabled;
+		const turnOnButton = settingsContent.locator(".mod-cta", {
+			hasText: "Turn on community plugins",
+		});
+
+		// ボタンが表示されるまで最大5秒待機
+		try {
+			await turnOnButton.waitFor({ state: "visible", timeout: 5000 });
+			logger.debug("Clicking 'Turn on community plugins' button...");
+			await turnOnButton.click();
+		} catch (e) {
+			await page.pause()
+			logger.debug(
+				"'Turn on community plugins' button not found, assuming it's already on.",
+			);
+		}
+
+		// 3. 設定画面を閉じる
+		await page.keyboard.press("Escape");
+		logger.debug("Closed settings window.");
+
+		// 4. 最終確認：API経由でプラグインが有効になったことを確認
+		await expect
+			.poll(async () => await this.checkIsCommunityPluginEnabled(page), {
+				message: "Failed to enable community plugins.",
+				timeout: 10000,
+			})
+			.toBe(true);
+		logger.debug("Successfully enabled community plugins.");
+	}
+
+	private async checkIsCommunityPluginEnabled(page: Page): Promise<boolean> {
+		return page.evaluate(
+			() => (window as any).app?.plugins?.isEnabled?.() ?? false,
+		);
 	}
 }

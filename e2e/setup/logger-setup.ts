@@ -1,6 +1,6 @@
+import chalk from "chalk";
 import log from "loglevel";
 import prefix from "loglevel-plugin-prefix";
-import chalk from "chalk";
 
 // 色の設定
 const colors = {
@@ -26,6 +26,4 @@ prefix.apply(log, {
 });
 
 // デフォルトレベルを設定
-log.setDefaultLevel("trace");
-
 console.log("✅ Log level set to 'trace' with prefix plugin.");

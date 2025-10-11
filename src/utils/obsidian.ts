@@ -1,5 +1,4 @@
-import { App, CachedMetadata, TAbstractFile, TFile, TFolder } from "obsidian";
-import { FileExplorerView } from "obsidian-typings";
+import { App, CachedMetadata, TFile } from "obsidian";
 import { uniqBy } from ".";
 
 /**
@@ -132,3 +131,4 @@ export function getFrontmatterAsync(app: App, file: TFile): Promise<any> {
 	});
 }
 export { parseYaml, stringifyYaml } from "obsidian";
+
