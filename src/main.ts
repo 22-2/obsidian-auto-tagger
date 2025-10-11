@@ -1,7 +1,7 @@
 import { Plugin } from "obsidian";
 import {
-	type PersonalContextSettings,
 	DEFAULT_SETTINGS,
+	type PersonalContextSettings,
 	PersonalContextSettingTab,
 } from "./settings";
 import { toggleLoggerBy } from "./utils/logger";
@@ -48,17 +48,35 @@ export default class MyPlugin extends Plugin {
 	}
 
 	configureLogger(): void {
-		toggleLoggerBy(
-			this.settings.common.enableDebugLogging ? "DEBUG" : "ERROR",
-		);
+		toggleLoggerBy(this.settings.common.enableDebugLogging ? "DEBUG" : "ERROR");
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign(
-			{},
-			DEFAULT_SETTINGS,
-			await this.loadData(),
-		);
+		const loadedData = await this.loadData();
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, loadedData);
+		// Ensure nested objects are properly merged
+		if (loadedData) {
+			this.settings.common = Object.assign(
+				{},
+				DEFAULT_SETTINGS.common,
+				loadedData.common,
+			);
+			this.settings.aiContext = Object.assign(
+				{},
+				DEFAULT_SETTINGS.aiContext,
+				loadedData.aiContext,
+			);
+			this.settings.basesSuggester = Object.assign(
+				{},
+				DEFAULT_SETTINGS.basesSuggester,
+				loadedData.basesSuggester,
+			);
+			this.settings.autoTagger = Object.assign(
+				{},
+				DEFAULT_SETTINGS.autoTagger,
+				loadedData.autoTagger,
+			);
+		}
 	}
 
 	async saveSettings() {

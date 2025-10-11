@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting } from "obsidian";
+import { PluginSettingTab, Setting } from "obsidian";
 import type PersonalContextPlugin from "./main";
 
 const GEMINI_MODELS = [
@@ -28,10 +28,21 @@ export interface BasesSuggesterSettings {
 	// excludeExisting: boolean; // 新オプション <-- この行を削除
 }
 
+export interface AutoTaggerSettings {
+	targetDirectory: string;
+	excludeNoteTag: string;
+	excludeSuggestionTags: string[];
+	systemInstruction: string;
+	batchSize: number;
+	logFilePath: string;
+	maxLogFileSize: number;
+}
+
 export interface PersonalContextSettings {
 	common: CommonSettings;
 	aiContext: AIContextSettings;
 	basesSuggester: BasesSuggesterSettings;
+	autoTagger: AutoTaggerSettings;
 }
 
 // --- 新しいデフォルト設定 ---
@@ -50,6 +61,16 @@ export const DEFAULT_SETTINGS: PersonalContextSettings = {
 	basesSuggester: {
 		sampleSize: 10,
 		// excludeExisting: true, // デフォルトで有効 <-- この行を削除
+	},
+	autoTagger: {
+		targetDirectory: "",
+		excludeNoteTag: "",
+		excludeSuggestionTags: [],
+		systemInstruction:
+			"あなたは知識管理の専門家です。ノートの内容を分析し、最も適切なタグを提案してください。",
+		batchSize: 5,
+		logFilePath: ".obsidian/plugins/personal-context/logs/auto-tag.log",
+		maxLogFileSize: 10,
 	},
 };
 
@@ -74,7 +95,8 @@ export class PersonalContextSettingTab extends PluginSettingTab {
 			.setName("Gemini API Key")
 			.setDesc("Enter your Google AI Studio Gemini API key.")
 			.addText((text) => {
-				text.setPlaceholder("Enter your API key")
+				text
+					.setPlaceholder("Enter your API key")
 					.setValue(this.plugin.settings.common.geminiApiKey)
 					.onChange(async (value) => {
 						this.plugin.settings.common.geminiApiKey = value.trim();
@@ -169,8 +191,7 @@ export class PersonalContextSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.aiContext.maxNotesToProcess)
 					.setDynamicTooltip()
 					.onChange(async (value) => {
-						this.plugin.settings.aiContext.maxNotesToProcess =
-							value;
+						this.plugin.settings.aiContext.maxNotesToProcess = value;
 						await this.plugin.saveSettings();
 					}),
 			);
@@ -182,13 +203,9 @@ export class PersonalContextSettingTab extends PluginSettingTab {
 			)
 			.addToggle((toggle) =>
 				toggle
-					.setValue(
-						this.plugin.settings.aiContext
-							.includeNoteContentInContext,
-					)
+					.setValue(this.plugin.settings.aiContext.includeNoteContentInContext)
 					.onChange(async (value) => {
-						this.plugin.settings.aiContext.includeNoteContentInContext =
-							value;
+						this.plugin.settings.aiContext.includeNoteContentInContext = value;
 						await this.plugin.saveSettings();
 					}),
 			);
@@ -219,6 +236,115 @@ export class PersonalContextSettingTab extends PluginSettingTab {
 			);
 
 		// --- ここから "Exclude notes" の設定を削除 ---
+
+		// --- Auto Tagger Section ---
+		containerEl.createEl("h3", { text: "Auto Tagger Settings" });
+		const autoTaggerDesc = containerEl.createEl("p", {
+			cls: "setting-item-description",
+		});
+		autoTaggerDesc.setText(
+			"Settings for automatic tagging of notes using Gemini AI.",
+		);
+
+		new Setting(containerEl)
+			.setName("Target directory")
+			.setDesc(
+				"Directory path to process notes from (e.g., 'notes/' or leave empty for vault root).",
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("notes/")
+					.setValue(this.plugin.settings.autoTagger.targetDirectory)
+					.onChange(async (value) => {
+						this.plugin.settings.autoTagger.targetDirectory = value.trim();
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName("Exclude note tag")
+			.setDesc(
+				"Notes with this tag will be excluded from auto-tagging (e.g., 'processed').",
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("processed")
+					.setValue(this.plugin.settings.autoTagger.excludeNoteTag)
+					.onChange(async (value) => {
+						this.plugin.settings.autoTagger.excludeNoteTag = value.trim();
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName("Exclude suggestion tags")
+			.setDesc(
+				"Comma-separated list of tags to exclude from AI suggestions (e.g., 'meta, system, private').",
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("meta, system")
+					.setValue(
+						this.plugin.settings.autoTagger.excludeSuggestionTags.join(", "),
+					)
+					.onChange(async (value) => {
+						this.plugin.settings.autoTagger.excludeSuggestionTags = value
+							.split(",")
+							.map((tag) => tag.trim())
+							.filter((tag) => tag.length > 0);
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName("System instruction")
+			.setDesc(
+				"Custom instruction for the AI to guide tagging behavior. This will be sent with each request.",
+			)
+			.addTextArea((text) => {
+				text
+					.setPlaceholder("Enter custom instructions for the AI...")
+					.setValue(this.plugin.settings.autoTagger.systemInstruction)
+					.onChange(async (value) => {
+						this.plugin.settings.autoTagger.systemInstruction = value;
+						await this.plugin.saveSettings();
+					});
+				text.inputEl.rows = 4;
+				text.inputEl.cols = 50;
+			});
+
+		new Setting(containerEl)
+			.setName("Log file path")
+			.setDesc(
+				"Path where auto-tagging logs will be saved (relative to vault root).",
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder(
+						".obsidian/plugins/personal-context/logs/auto-tag.log",
+					)
+					.setValue(this.plugin.settings.autoTagger.logFilePath)
+					.onChange(async (value) => {
+						this.plugin.settings.autoTagger.logFilePath = value.trim();
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName("Max log file size (MB)")
+			.setDesc(
+				"Maximum size of the log file before rotation. When exceeded, a new log file will be created.",
+			)
+			.addSlider((slider) =>
+				slider
+					.setLimits(1, 50, 1)
+					.setValue(this.plugin.settings.autoTagger.maxLogFileSize)
+					.setDynamicTooltip()
+					.onChange(async (value) => {
+						this.plugin.settings.autoTagger.maxLogFileSize = value;
+						await this.plugin.saveSettings();
+					}),
+			);
 
 		// --- Advanced Section ---
 		containerEl.createEl("h3", { text: "Advanced" });

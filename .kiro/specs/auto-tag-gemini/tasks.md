@@ -1,6 +1,6 @@
 # Implementation Plan
 
-- [ ] 1. 設定管理の拡張
+- [x] 1. 設定管理の拡張
   - 既存の`settings.ts`に`AutoTaggerSettings`インターフェースを追加
   - デフォルト設定値を定義
   - 設定タブに自動タグ付けセクションを追加（対象ディレクトリ、除外タグ、system instruction、ログパス）
