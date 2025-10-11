@@ -138,7 +138,7 @@ export class AutoTaggerPageObject extends ObsidianPageObject {
 		const logEntries = await this.logContainer.locator(".log-entry").all();
 		return Promise.all(
 			logEntries.map((entry) => entry.textContent() || ""),
-		);
+		) as Promise<string[]>;
 	}
 
 	// ===== AutoTagger アサーション =====
