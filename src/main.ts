@@ -6,6 +6,7 @@ import {
 	type PersonalContextSettings,
 } from "./settings";
 import { toggleLoggerBy } from "./utils/logger";
+import { AUTO_TAG_VIEW_TYPE, AutoTagView } from "./view/autoTagView";
 import { SvelteView, VIEW_TYPE } from "./view/view";
 
 export default class MyPlugin extends Plugin {
@@ -17,9 +18,17 @@ export default class MyPlugin extends Plugin {
 		this.configureLogger();
 
 		this.registerView(VIEW_TYPE, (leaf) => new SvelteView(leaf, this));
+		this.registerView(
+			AUTO_TAG_VIEW_TYPE,
+			(leaf) => new AutoTagView(leaf, this),
+		);
 
 		this.addRibbonIcon("dice", "Activate svelte view", () => {
 			this.activateView();
+		});
+
+		this.addRibbonIcon("tag", "Open Auto Tagger", () => {
+			this.activateAutoTagView();
 		});
 
 		this.addCommand({
@@ -29,10 +38,19 @@ export default class MyPlugin extends Plugin {
 				this.activateView();
 			},
 		});
+
+		this.addCommand({
+			id: "open-auto-tag-view",
+			name: "Open Auto Tagger",
+			callback: () => {
+				this.activateAutoTagView();
+			},
+		});
 	}
 
 	onunload() {
 		this.app.workspace.detachLeavesOfType(VIEW_TYPE);
+		this.app.workspace.detachLeavesOfType(AUTO_TAG_VIEW_TYPE);
 	}
 
 	async activateView() {
@@ -48,8 +66,23 @@ export default class MyPlugin extends Plugin {
 		);
 	}
 
+	async activateAutoTagView() {
+		this.app.workspace.detachLeavesOfType(AUTO_TAG_VIEW_TYPE);
+
+		await this.app.workspace.getRightLeaf(false)?.setViewState({
+			type: AUTO_TAG_VIEW_TYPE,
+			active: true,
+		});
+
+		this.app.workspace.revealLeaf(
+			this.app.workspace.getLeavesOfType(AUTO_TAG_VIEW_TYPE)[0],
+		);
+	}
+
 	configureLogger(): void {
-		toggleLoggerBy(this.settings.common.enableDebugLogging ? "DEBUG" : "ERROR");
+		toggleLoggerBy(
+			this.settings.common.enableDebugLogging ? "DEBUG" : "ERROR",
+		);
 	}
 
 	async loadSettings() {
