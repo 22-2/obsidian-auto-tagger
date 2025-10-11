@@ -109,8 +109,8 @@ jobs:
               run: |
                   npx @telosh/filetree --exclude node_modules,.git
 
-            - name: Run Playwright example tests
-              run: pnpm run test:e2e:example
+            - name: Run Playwright all tests
+              run: pnpm run test:e2e
               env:
                   DEBUG: "pw:browser"
 
