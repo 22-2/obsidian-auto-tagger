@@ -133,42 +133,52 @@ Exclude Suggestion Tags: ${excludeSuggestionTags.length > 0 ? excludeSuggestionT
 	private async appendToLogFile(content: string): Promise<void> {
 		const vault = this.app.vault;
 
-		try {
-			// ログファイルが存在するか確認
-			const file = vault.getAbstractFileByPath(this.logFilePath);
+		// ディレクトリが存在することを確認
+		await this.ensureDirectoryExists();
 
-			if (file instanceof TFile) {
-				// 既存ファイルに追記
-				const existingContent = await vault.read(file);
-				await vault.modify(file, existingContent + content);
-			} else {
-				// 新規ファイルを作成
-				// ディレクトリが存在しない場合は作成
-				await this.ensureDirectoryExists();
+		// リトライ処理
+		const maxRetries = 3;
+		let lastError: Error | null = null;
 
-				try {
-					await vault.create(this.logFilePath, content);
-				} catch (createError) {
-					// "File already exists"エラーの場合は、ファイルを取得して追記
-					const errorMsg = createError instanceof Error ? createError.message : String(createError);
-					if (errorMsg.includes("File already exists") || errorMsg.includes("already exists")) {
-						const existingFile = vault.getAbstractFileByPath(this.logFilePath);
-						if (existingFile instanceof TFile) {
-							const existingContent = await vault.read(existingFile);
-							await vault.modify(existingFile, existingContent + content);
-						} else {
-							throw createError;
+		for (let attempt = 0; attempt < maxRetries; attempt++) {
+			try {
+				// ファイルの存在を確認
+				let file = vault.getAbstractFileByPath(this.logFilePath);
+
+				if (file instanceof TFile) {
+					try {
+						// 既存ファイルに追記
+						const existingContent = await vault.read(file);
+						await vault.modify(file, existingContent + content);
+						return; // 成功したら終了
+					} catch (readError) {
+						// 読み取りエラーの場合はリトライ
+						lastError = readError instanceof Error ? readError : new Error(String(readError));
+						await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)));
+						continue;
+					}
+				} else {
+					try {
+						// 新規ファイルを作成
+						await vault.create(this.logFilePath, content);
+						return; // 成功したら終了
+					} catch (createError) {
+						// 既に存在する場合は次のループで処理する
+						const errorMsg = createError instanceof Error ? createError.message : String(createError);
+						if (!errorMsg.includes("File already exists") && !errorMsg.includes("already exists")) {
+							lastError = createError instanceof Error ? createError : new Error(String(createError));
+							await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)));
 						}
-					} else {
-						throw createError;
 					}
 				}
+			} catch (error) {
+				lastError = error instanceof Error ? error : new Error(String(error));
+				await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)));
 			}
-		} catch (error) {
-			// ファイル操作エラーを上位に伝播
-			const errorMsg = error instanceof Error ? error.message : String(error);
-			throw new Error(`ログファイル書き込みエラー: ${errorMsg}`);
 		}
+
+		// リトライ回数を超えた場合はエラーをスロー
+		throw new Error(`ログファイルの書き込みに失敗しました (${maxRetries}回リトライ): ${lastError?.message || '不明なエラー'}`);
 	}
 
 	/**
