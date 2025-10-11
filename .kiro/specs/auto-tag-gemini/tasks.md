@@ -84,7 +84,7 @@
   - 中断時も途中までのサマリーを表示
   - _Requirements: 7.4, 7.5_
 
-- [ ] 7. Obsidian View統合
+- [x] 7. Obsidian View統合
   - `src/view/autoTagView.ts`を作成
   - `ItemView`を継承してAutoTagViewをラップ
   - ビュータイプを登録
