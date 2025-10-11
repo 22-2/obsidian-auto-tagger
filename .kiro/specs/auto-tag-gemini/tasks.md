@@ -6,7 +6,7 @@
   - 設定タブに自動タグ付けセクションを追加（対象ディレクトリ、除外タグ、system instruction、ログパス）
   - _Requirements: 1.1, 1.2, 3.1, 3.2_
 
-- [ ] 2. NoteSelector サービスの実装
+- [x] 2. NoteSelector サービスの実装
   - `src/services/noteSelector.ts`を作成
   - 指定ディレクトリ配下のマークダウンファイル取得機能を実装
   - 除外タグによるフィルタリング機能を実装
