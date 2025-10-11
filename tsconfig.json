@@ -1,0 +1,39 @@
+{
+	"extends": "@tsconfig/svelte/tsconfig.json",
+	"compilerOptions": {
+		"target": "esnext",
+		"module": "esnext",
+		"moduleResolution": "bundler",
+		"esModuleInterop": true,
+		"strict": true,
+		"noEmit": true,
+		"baseUrl": ".",
+		"verbatimModuleSyntax": true,
+		"allowImportingTsExtensions": true,
+		"downlevelIteration": true,
+		"resolveJsonModule": true,
+		"paths": {
+			"src/*": [
+				"src/*"
+			]
+		},
+		"lib": [
+			"DOM",
+			"ESNext"
+		],
+		"types": [
+			"node",
+			"obsidian-typings",
+			"vitest/globals"
+		]
+	},
+	"include": [
+		"src/**/*",
+		"e2e/**/*",
+		"obsidian-testing-toolkit/**/*",
+		"scripts/*.*"
+	],
+	"exclude": [
+		"node_modules/*"
+	]
+}
