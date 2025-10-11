@@ -1,6 +1,6 @@
 import { requestUrl } from "obsidian";
 import type { PersonalContextSettings } from "src/settings";
-import { BatchNoteData } from "src/utils/types";
+import type { AutoTagBatchNote, BatchNoteData } from "src/utils/types";
 
 /**
  * Gemini APIを呼び出して、関連ノートのリストを取得します。
@@ -258,6 +258,75 @@ ${JSON.stringify(notesData, null, 2)}
       "path": "path/to/note2.md",
       "suggestedTags": ["ai", "machine-learning"],
       "suggestedKeywords": ["large language models", "transformer architecture", "AI ethics"]
+    }
+  ]
+}
+`;
+}
+
+/**
+ * 自動タグ付けバッチ処理用のプロンプトを構築します。
+ * @param notes 処理対象のノート情報の配列（最大5件）
+ * @param availableTags Vault内に存在する全タグのリスト（除外タグでフィルタリング済み）
+ * @param systemInstruction カスタムsystem instruction
+ * @returns 生成されたプロンプト文字列
+ */
+export function buildAutoTaggingPrompt(
+	notes: AutoTagBatchNote[],
+	availableTags: string[],
+	systemInstruction: string
+): string {
+	// 各ノートから既存タグを除外したタグリストを作成
+	const notesWithFilteredTags = notes.map((note) => {
+		const tagsToSuggestFrom = availableTags.filter(
+			(tag) => !note.existingTags.includes(tag)
+		);
+		return {
+			path: note.path,
+			title: note.title,
+			content: note.content.substring(0, 2000), // 最初の2000文字のみ
+			existingTags: note.existingTags,
+			availableTagsForThisNote: tagsToSuggestFrom,
+		};
+	});
+
+	return `
+${systemInstruction}
+
+## Task
+Your task is to analyze a batch of notes and suggest relevant tags for each one from the available tags in the vault.
+
+## Instructions
+1.  For each note provided in the "Notes to Process" section, analyze its title, existing tags, and content.
+2.  **Suggest Tags**:
+    -   Identify up to 5 relevant tags for each note.
+    -   **You MUST only suggest tags from the "Available Tags for This Note" list provided for each note.**
+    -   Do not suggest tags that already exist in the note's existing tags.
+    -   If no suitable tags are available, return an empty array for that note.
+3.  **Output Format**:
+    -   Your response MUST be a single, valid JSON object and nothing else.
+    -   The JSON object must have a single key "suggestions".
+    -   The value of "suggestions" must be an array of objects, where each object represents a note.
+    -   Each note object must have two keys: "path" (string) and "suggestedTags" (array of strings).
+    -   The order of notes in the output must match the order in the input.
+
+## Notes to Process
+${JSON.stringify(notesWithFilteredTags, null, 2)}
+
+## Example Output
+{
+  "suggestions": [
+    {
+      "path": "path/to/note1.md",
+      "suggestedTags": ["project-management", "productivity", "ai"]
+    },
+    {
+      "path": "path/to/note2.md",
+      "suggestedTags": ["machine-learning", "deep-learning"]
+    },
+    {
+      "path": "path/to/note3.md",
+      "suggestedTags": []
     }
   ]
 }

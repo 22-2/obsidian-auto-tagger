@@ -20,7 +20,7 @@
   - ログファイルのサイズチェックとローテーション機能を実装
   - _Requirements: 7.1, 7.2, 7.3, 7.6, 7.7_
 
-- [ ] 4. Gemini API プロンプト拡張
+- [x] 4. Gemini API プロンプト拡張
   - `src/api/gemini.ts`に`buildAutoTaggingPrompt`関数を追加
   - system instructionをプロンプトに組み込む
   - 5ノートのバッチ処理用のプロンプト構造を実装

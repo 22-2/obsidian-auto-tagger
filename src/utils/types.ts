@@ -22,3 +22,10 @@ export interface BatchNoteData {
 	content: string;
 	frontmatter: Record<string, any>;
 }
+
+export interface AutoTagBatchNote {
+	path: string;
+	title: string;
+	content: string;
+	existingTags: string[];
+}
