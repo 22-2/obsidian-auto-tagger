@@ -1,4 +1,4 @@
-import { type App, TFile } from "obsidian";
+import { type App, Notice, TFile } from "obsidian";
 
 export interface LogEntry {
 	timestamp: string;
@@ -40,7 +40,11 @@ export class LoggerService {
 			await this.appendToLogFile(logMessage);
 		} catch (error) {
 			// ログ書き込みに失敗してもエラーを投げない（要件7.7）
+			const errorMsg = error instanceof Error ? error.message : String(error);
 			console.error("Failed to write to log file:", error);
+
+			// UI上にエラーを表示 (Requirement 7.7)
+			new Notice(`ログファイルへの書き込みに失敗しました: ${errorMsg}`, 3000);
 		}
 	}
 
@@ -68,7 +72,9 @@ End Time: ${summary.endTime}
 
 			await this.appendToLogFile(summaryMessage);
 		} catch (error) {
+			const errorMsg = error instanceof Error ? error.message : String(error);
 			console.error("Failed to write summary to log file:", error);
+			new Notice(`サマリーのログ記録に失敗しました: ${errorMsg}`, 3000);
 		}
 	}
 
@@ -95,7 +101,9 @@ Exclude Suggestion Tags: ${excludeSuggestionTags.length > 0 ? excludeSuggestionT
 
 			await this.appendToLogFile(startMessage);
 		} catch (error) {
+			const errorMsg = error instanceof Error ? error.message : String(error);
 			console.error("Failed to write session start to log file:", error);
+			new Notice(`セッション開始のログ記録に失敗しました: ${errorMsg}`, 3000);
 		}
 	}
 
@@ -120,27 +128,35 @@ Exclude Suggestion Tags: ${excludeSuggestionTags.length > 0 ? excludeSuggestionT
 	/**
 	 * ログファイルに追記
 	 * @param content - 追記する内容
+	 * @throws ファイル操作に失敗した場合
 	 */
 	private async appendToLogFile(content: string): Promise<void> {
 		const vault = this.app.vault;
 
-		// ログファイルが存在するか確認
-		const file = vault.getAbstractFileByPath(this.logFilePath);
+		try {
+			// ログファイルが存在するか確認
+			const file = vault.getAbstractFileByPath(this.logFilePath);
 
-		if (file instanceof TFile) {
-			// 既存ファイルに追記
-			const existingContent = await vault.read(file);
-			await vault.modify(file, existingContent + content);
-		} else {
-			// 新規ファイルを作成
-			// ディレクトリが存在しない場合は作成
-			await this.ensureDirectoryExists();
-			await vault.create(this.logFilePath, content);
+			if (file instanceof TFile) {
+				// 既存ファイルに追記
+				const existingContent = await vault.read(file);
+				await vault.modify(file, existingContent + content);
+			} else {
+				// 新規ファイルを作成
+				// ディレクトリが存在しない場合は作成
+				await this.ensureDirectoryExists();
+				await vault.create(this.logFilePath, content);
+			}
+		} catch (error) {
+			// ファイル操作エラーを上位に伝播
+			const errorMsg = error instanceof Error ? error.message : String(error);
+			throw new Error(`ログファイル書き込みエラー: ${errorMsg}`);
 		}
 	}
 
 	/**
 	 * ログファイルのディレクトリが存在することを確認
+	 * @throws ディレクトリ作成に失敗した場合
 	 */
 	private async ensureDirectoryExists(): Promise<void> {
 		const dirPath = this.logFilePath.substring(
@@ -151,8 +167,13 @@ Exclude Suggestion Tags: ${excludeSuggestionTags.length > 0 ? excludeSuggestionT
 		if (dirPath) {
 			const dir = this.app.vault.getAbstractFileByPath(dirPath);
 			if (!dir) {
-				// ディレクトリを再帰的に作成
-				await this.createDirectoryRecursively(dirPath);
+				try {
+					// ディレクトリを再帰的に作成
+					await this.createDirectoryRecursively(dirPath);
+				} catch (error) {
+					const errorMsg = error instanceof Error ? error.message : String(error);
+					throw new Error(`ログディレクトリ作成エラー: ${errorMsg}`);
+				}
 			}
 		}
 	}
@@ -160,6 +181,7 @@ Exclude Suggestion Tags: ${excludeSuggestionTags.length > 0 ? excludeSuggestionT
 	/**
 	 * ディレクトリを再帰的に作成
 	 * @param path - ディレクトリパス
+	 * @throws ディレクトリ作成に失敗した場合
 	 */
 	private async createDirectoryRecursively(path: string): Promise<void> {
 		const parts = path.split("/");
@@ -170,7 +192,12 @@ Exclude Suggestion Tags: ${excludeSuggestionTags.length > 0 ? excludeSuggestionT
 			const exists = this.app.vault.getAbstractFileByPath(currentPath);
 
 			if (!exists) {
-				await this.app.vault.createFolder(currentPath);
+				try {
+					await this.app.vault.createFolder(currentPath);
+				} catch (error) {
+					const errorMsg = error instanceof Error ? error.message : String(error);
+					throw new Error(`フォルダ作成エラー (${currentPath}): ${errorMsg}`);
+				}
 			}
 		}
 	}

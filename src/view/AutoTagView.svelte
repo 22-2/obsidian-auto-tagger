@@ -6,6 +6,12 @@
 
 	export let plugin: MyPlugin;
 
+	// Helper function to show notices
+	function showNotice(message: string, duration = 3000) {
+		// @ts-ignore - Notice is available globally in Obsidian
+		new Notice(message, duration);
+	}
+
 	// State
 	let isRunning = false;
 	let state: AutoTaggerState | null = null;
@@ -40,6 +46,21 @@
 		summary = null;
 		currentNoteName = "";
 
+		// Validate API key (Requirement 1.3)
+		if (!plugin.settings.common.geminiApiKey || plugin.settings.common.geminiApiKey.trim() === "") {
+			const errorMsg = "Gemini API keyが設定されていません。設定画面でAPI keyを入力してください。";
+			addLog(`エラー: ${errorMsg}`);
+			showNotice(errorMsg, 5000);
+			return;
+		}
+
+		// Validate system instruction length (Requirement 3.5)
+		if (systemInstruction.length > 5000) {
+			const warningMsg = "System instructionが5000文字を超えています。処理を続行しますが、API呼び出しに失敗する可能性があります。";
+			addLog(`警告: ${warningMsg}`);
+			showNotice(warningMsg, 5000);
+		}
+
 		// Update settings
 		plugin.settings.autoTagger.targetDirectory = targetDirectory.trim();
 		plugin.settings.autoTagger.excludeNoteTag = excludeNoteTag.trim();
@@ -50,7 +71,7 @@
 		plugin.settings.autoTagger.systemInstruction = systemInstruction;
 		await plugin.saveSettings();
 
-		// Get target notes
+		// Get target notes (Requirement 1.3, 1.5)
 		try {
 			const noteSelector = new NoteSelector(plugin.app);
 			targetNotes = await noteSelector.getTargetNotes({
@@ -59,8 +80,11 @@
 			});
 
 			addLog(`対象ノート数: ${targetNotes.length}`);
+			showNotice(`自動タグ付けを開始します（対象: ${targetNotes.length}件）`);
 		} catch (error) {
-			addLog(`エラー: ${error instanceof Error ? error.message : String(error)}`);
+			const errorMsg = error instanceof Error ? error.message : String(error);
+			addLog(`エラー: ${errorMsg}`);
+			showNotice(`エラー: ${errorMsg}`, 5000);
 			return;
 		}
 
@@ -71,33 +95,43 @@
 		isRunning = true;
 		addLog("自動タグ付け処理を開始しました");
 
-		await autoTagger.start(
-			targetNotes,
-			(newState: AutoTaggerState) => {
-				state = newState;
-				if (!newState.isRunning) {
-					isRunning = false;
-					if (autoTagger) {
-						summary = autoTagger.getSummary();
+		try {
+			await autoTagger.start(
+				targetNotes,
+				(newState: AutoTaggerState) => {
+					state = newState;
+					if (!newState.isRunning) {
+						isRunning = false;
+						if (autoTagger) {
+							summary = autoTagger.getSummary();
+						}
+						if (newState.shouldStop) {
+							addLog("処理が中断されました");
+							showNotice("自動タグ付け処理が中断されました");
+						} else {
+							addLog("処理が完了しました");
+							showNotice(`自動タグ付け処理が完了しました（成功: ${newState.successCount}件、失敗: ${newState.errorCount}件）`);
+						}
 					}
-					if (newState.shouldStop) {
-						addLog("処理が中断されました");
-					} else {
-						addLog("処理が完了しました");
+				},
+				(results: BatchResult[]) => {
+					for (const result of results) {
+						if (result.success && result.suggestedTags.length > 0) {
+							currentNoteName = result.path;
+							addLog(`✓ ${result.path}: ${result.suggestedTags.join(", ")}`);
+						} else if (!result.success) {
+							addLog(`✗ ${result.path}: ${result.error || "エラー"}`);
+						}
 					}
 				}
-			},
-			(results: BatchResult[]) => {
-				for (const result of results) {
-					if (result.success && result.suggestedTags.length > 0) {
-						currentNoteName = result.path;
-						addLog(`✓ ${result.path}: ${result.suggestedTags.join(", ")}`);
-					} else if (!result.success) {
-						addLog(`✗ ${result.path}: ${result.error || "エラー"}`);
-					}
-				}
-			}
-		);
+			);
+		} catch (error) {
+			// Unexpected error during processing (Requirement 4.6)
+			const errorMsg = error instanceof Error ? error.message : String(error);
+			addLog(`予期しないエラーが発生しました: ${errorMsg}`);
+			showNotice(`予期しないエラーが発生しました: ${errorMsg}`, 5000);
+			isRunning = false;
+		}
 	}
 
 	function stopAutoTagging() {

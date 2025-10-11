@@ -1,4 +1,4 @@
-import { type App, type TFile } from "obsidian";
+import { type App, Notice, type TFile } from "obsidian";
 import { buildAutoTaggingPrompt, callGeminiApi } from "../api/gemini";
 import type { AutoTaggerSettings, CommonSettings } from "../settings";
 import { getAllVaultTags, getFrontmatterAsync } from "../utils/obsidian";
@@ -151,7 +151,9 @@ export class AutoTagger {
 								success: true,
 							});
 						} catch (error) {
+							// ファイル操作エラー (Requirement 4.6)
 							this.state.errorCount++;
+							const errorMsg = error instanceof Error ? error.message : String(error);
 
 							// エラーをログに記録
 							await this.logger.log({
@@ -159,11 +161,11 @@ export class AutoTagger {
 								notePath: result.path,
 								appliedTags: [],
 								success: false,
-								error:
-									error instanceof Error
-										? error.message
-										: String(error),
+								error: errorMsg,
 							});
+
+							// ユーザーに通知
+							new Notice(`${result.path}: ${errorMsg}`, 3000);
 						}
 					}
 				} else if (!result.success) {
@@ -214,16 +216,33 @@ export class AutoTagger {
 			// ノート情報を構築
 			const batchNotes: AutoTagBatchNote[] = [];
 			for (const note of notes) {
-				const content = await this.app.vault.cachedRead(note);
-				const frontmatter = await getFrontmatterAsync(this.app, note);
-				const existingTags = (frontmatter?.tags || []) as string[];
+				try {
+					const content = await this.app.vault.cachedRead(note);
+					const frontmatter = await getFrontmatterAsync(this.app, note);
+					const existingTags = (frontmatter?.tags || []) as string[];
 
-				batchNotes.push({
-					path: note.path,
-					title: note.basename,
-					content: content,
-					existingTags: existingTags,
-				});
+					batchNotes.push({
+						path: note.path,
+						title: note.basename,
+						content: content,
+						existingTags: existingTags,
+					});
+				} catch (error) {
+					// ファイル読み込みエラー (Requirement 4.6)
+					const errorMsg = error instanceof Error ? error.message : String(error);
+					console.error(`Failed to read note ${note.path}:`, error);
+					results.push({
+						path: note.path,
+						suggestedTags: [],
+						success: false,
+						error: `ファイル読み込みエラー: ${errorMsg}`,
+					});
+				}
+			}
+
+			// 読み込みに成功したノートがない場合は終了
+			if (batchNotes.length === 0) {
+				return results;
 			}
 
 			// プロンプトを構築
@@ -233,35 +252,107 @@ export class AutoTagger {
 				this.settings.systemInstruction,
 			);
 
-			// Gemini APIを呼び出し
-			const responseText = await callGeminiApi(prompt, {
-				common: this.geminiSettings,
-				aiContext: {} as any,
-				basesSuggester: {} as any,
-				autoTagger: this.settings,
-			});
+			// Gemini APIを呼び出し (Requirement 2.5)
+			let responseText: string;
+			try {
+				responseText = await callGeminiApi(prompt, {
+					common: this.geminiSettings,
+					aiContext: {} as any,
+					basesSuggester: {} as any,
+					autoTagger: this.settings,
+				});
+			} catch (error) {
+				// API呼び出しエラー (Requirement 2.5, 4.6)
+				const errorMsg = error instanceof Error ? error.message : String(error);
+				console.error("Gemini API call failed:", error);
+
+				// ユーザーに通知
+				new Notice(`API呼び出しエラー: ${errorMsg}`, 5000);
+
+				// 全ノートを失敗として記録
+				for (const note of batchNotes) {
+					if (!results.find(r => r.path === note.path)) {
+						results.push({
+							path: note.path,
+							suggestedTags: [],
+							success: false,
+							error: `API呼び出しエラー: ${errorMsg}`,
+						});
+					}
+				}
+				return results;
+			}
 
 			// レスポンスをパース
-			const response: AutoTaggingResponse = JSON.parse(responseText);
+			let response: AutoTaggingResponse;
+			try {
+				response = JSON.parse(responseText);
+			} catch (error) {
+				// JSONパースエラー (Requirement 2.5)
+				const errorMsg = error instanceof Error ? error.message : String(error);
+				console.error("Failed to parse API response:", error);
+				console.error("Response text:", responseText);
+
+				// ユーザーに通知
+				new Notice(`APIレスポンスのパースエラー: ${errorMsg}`, 5000);
+
+				// 全ノートを失敗として記録
+				for (const note of batchNotes) {
+					if (!results.find(r => r.path === note.path)) {
+						results.push({
+							path: note.path,
+							suggestedTags: [],
+							success: false,
+							error: `レスポンスパースエラー: ${errorMsg}`,
+						});
+					}
+				}
+				return results;
+			}
+
+			// レスポンスの検証
+			if (!response.suggestions || !Array.isArray(response.suggestions)) {
+				console.error("Invalid API response structure:", response);
+				new Notice("APIレスポンスの形式が不正です", 5000);
+
+				// 全ノートを失敗として記録
+				for (const note of batchNotes) {
+					if (!results.find(r => r.path === note.path)) {
+						results.push({
+							path: note.path,
+							suggestedTags: [],
+							success: false,
+							error: "APIレスポンスの形式が不正です",
+						});
+					}
+				}
+				return results;
+			}
 
 			// 各ノートの結果を処理
 			for (const suggestion of response.suggestions) {
 				results.push({
 					path: suggestion.path,
-					suggestedTags: suggestion.suggestedTags,
+					suggestedTags: suggestion.suggestedTags || [],
 					success: true,
 				});
 			}
 		} catch (error) {
+			// 予期しないエラー (Requirement 4.6)
+			const errorMsg = error instanceof Error ? error.message : String(error);
+			console.error("Unexpected error in processBatch:", error);
+			new Notice(`予期しないエラー: ${errorMsg}`, 5000);
+
 			// エラーが発生した場合、全ノートを失敗として記録
 			for (const note of notes) {
-				results.push({
-					path: note.path,
-					suggestedTags: [],
-					success: false,
-					error:
-						error instanceof Error ? error.message : String(error),
-				});
+				if (!results.find(r => r.path === note.path)) {
+					results.push({
+						path: note.path,
+						suggestedTags: [],
+						success: false,
+						error: errorMsg,
+					});
+				}
 			}
 		}
 
@@ -272,29 +363,37 @@ export class AutoTagger {
 	 * タグをノートに適用
 	 * @param file 対象ノート
 	 * @param tags 適用するタグ配列
+	 * @throws ファイル操作に失敗した場合
 	 */
 	private async applyTagsToNote(file: TFile, tags: string[]): Promise<void> {
 		if (tags.length === 0) {
 			return;
 		}
 
-		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
-			// 既存のタグを取得
-			let existingTags: string[] = [];
-			if (frontmatter.tags) {
-				if (Array.isArray(frontmatter.tags)) {
-					existingTags = frontmatter.tags;
-				} else if (typeof frontmatter.tags === "string") {
-					existingTags = [frontmatter.tags];
+		try {
+			await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+				// 既存のタグを取得
+				let existingTags: string[] = [];
+				if (frontmatter.tags) {
+					if (Array.isArray(frontmatter.tags)) {
+						existingTags = frontmatter.tags;
+					} else if (typeof frontmatter.tags === "string") {
+						existingTags = [frontmatter.tags];
+					}
 				}
-			}
 
-			// 新しいタグを追加（重複を除外）
-			const newTags = tags.filter((tag) => !existingTags.includes(tag));
-			if (newTags.length > 0) {
-				frontmatter.tags = [...existingTags, ...newTags];
-			}
-		});
+				// 新しいタグを追加（重複を除外）
+				const newTags = tags.filter((tag) => !existingTags.includes(tag));
+				if (newTags.length > 0) {
+					frontmatter.tags = [...existingTags, ...newTags];
+				}
+			});
+		} catch (error) {
+			// ファイル操作エラー (Requirement 4.6)
+			const errorMsg = error instanceof Error ? error.message : String(error);
+			console.error(`Failed to apply tags to ${file.path}:`, error);
+			throw new Error(`タグ適用エラー: ${errorMsg}`);
+		}
 	}
 
 	/**
