@@ -202,7 +202,7 @@ This guide provides troubleshooting steps and debugging techniques for the Auto 
 **Useful Console Commands**:
 ```javascript
 // Get plugin instance
-const plugin = app.plugins.plugins['personal-context'];
+const plugin = app.plugins.plugins['auto-tagger'];
 
 // Check settings
 console.log(plugin.settings);
@@ -252,7 +252,7 @@ For developers:
 
 ### Check Log File
 
-**Location**: `.obsidian/plugins/personal-context/logs/auto-tag.log`
+**Location**: `.obsidian/plugins/auto-tagger/logs/auto-tag.log`
 
 **What to Look For**:
 - Session start timestamp
@@ -360,7 +360,7 @@ console.log('Found notes:', notes.length);
 const { LoggerService } = require('./src/services/logger');
 const logger = new LoggerService(
   app,
-  '.obsidian/plugins/personal-context/logs/test.log',
+  '.obsidian/plugins/auto-tagger/logs/test.log',
   10
 );
 
@@ -377,7 +377,7 @@ await logger.log({
 
 ```javascript
 // In console
-const plugin = app.plugins.plugins['personal-context'];
+const plugin = app.plugins.plugins['auto-tagger'];
 const autoTagger = plugin.createAutoTagger();
 
 // Check state
@@ -439,11 +439,11 @@ When reporting issues, include:
 // Run in console to export debug info
 const debugInfo = {
   obsidianVersion: app.appVersion,
-  pluginVersion: app.plugins.plugins['personal-context'].manifest.version,
+  pluginVersion: app.plugins.plugins['auto-tagger'].manifest.version,
   settings: {
-    ...app.plugins.plugins['personal-context'].settings,
+    ...app.plugins.plugins['auto-tagger'].settings,
     common: {
-      ...app.plugins.plugins['personal-context'].settings.common,
+      ...app.plugins.plugins['auto-tagger'].settings.common,
       geminiApiKey: '[REDACTED]'
     }
   },

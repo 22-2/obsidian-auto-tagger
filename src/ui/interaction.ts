@@ -7,6 +7,7 @@ import {
 	TAbstractFile,
 	TFolder,
 } from "obsidian";
+import { getAllVaultTags } from "src/utils/obsidian";
 
 /**
  * Generic confirmation modal utility
@@ -42,7 +43,7 @@ export class ConfirmModal extends Modal {
 		new Setting(contentEl)
 			.addButton((btn) =>
 				btn
-					.setButtonText(t("modals.confirmSaveLocation.buttons.yes"))
+					.setButtonText("Yes")
 					.setCta()
 					.onClick(() => {
 						this.callback(true);
@@ -51,7 +52,7 @@ export class ConfirmModal extends Modal {
 			)
 			.addButton((btn) =>
 				btn
-					.setButtonText(t("modals.confirmSaveLocation.buttons.no"))
+					.setButtonText("No")
 					.onClick(() => {
 						this.callback(false);
 						this.close();
@@ -82,7 +83,7 @@ abstract class PathSuggest<
 	}
 
 	protected formatPath(path: string, isRoot?: boolean): string {
-		return path === "" || isRoot ? t("folderSuggest.vaultRoot") : path;
+		return path === "" || isRoot ? "Vault Root" : path;
 	}
 
 	selectSuggestion(item: T): void {
@@ -198,7 +199,7 @@ class FilePathPromptModal extends Modal {
 	 */
 	private submit(): void {
 		if (!this.fileName.trim()) {
-			new Notice(t("notices.fileNameCannotBeEmpty"));
+			new Notice("File name cannot be empty");
 			return;
 		}
 
@@ -238,24 +239,20 @@ class FilePathPromptModal extends Modal {
 
 	onOpen(): void {
 		const { contentEl, titleEl } = this;
-		titleEl.setText(t("modals.confirmSaveLocation.title"));
+		titleEl.setText("Save Location");
 
 		contentEl.createEl("p", {
-			text: t("modals.confirmSaveLocation.convertingNote", {
-				title: this.baseFileName,
-			}),
+			text: `Converting note: ${this.baseFileName}`,
 		});
 
 		// File name input
 		new Setting(contentEl)
-			.setName(t("modals.confirmSaveLocation.fileName.name"))
-			.setDesc(t("modals.confirmSaveLocation.fileName.desc"))
+			.setName("File name")
+			.setDesc("Enter the name for the new file")
 			.addText((text) => {
-				text.setPlaceholder(
-					t("modals.confirmSaveLocation.fileName.placeholder"),
-				)
-					.setValue(this.fileName)
-					.onChange((value) => {
+				text.setPlaceholder("Enter file name")
+				.setValue(this.fileName)
+				.onChange((value) => {
 						this.fileName = value;
 					});
 				text.inputEl.addEventListener("keydown", (e) =>
@@ -265,13 +262,11 @@ class FilePathPromptModal extends Modal {
 
 		// Folder path input with autocomplete
 		new Setting(contentEl)
-			.setName(t("modals.confirmSaveLocation.folderPath.name"))
-			.setDesc(t("modals.confirmSaveLocation.folderPath.desc"))
+			.setName("Folder path")
+			.setDesc("Select the folder to save the file in")
 			.addSearch((search) => {
 				search
-					.setPlaceholder(
-						t("modals.confirmSaveLocation.folderPath.placeholder"),
-					)
+					.setPlaceholder("Select a folder...")
 					.setValue(this.folderPath)
 					.onChange((value) => {
 						this.folderPath = value;
@@ -286,15 +281,13 @@ class FilePathPromptModal extends Modal {
 		new Setting(contentEl)
 			.addButton((btn) =>
 				btn
-					.setButtonText(t("modals.confirmSaveLocation.buttons.save"))
+					.setButtonText("Save")
 					.setCta()
 					.onClick(() => this.submit()),
 			)
 			.addButton((btn) =>
 				btn
-					.setButtonText(
-						t("modals.confirmSaveLocation.buttons.cancel"),
-					)
+					.setButtonText("Cancel")
 					.onClick(() =>
 						this.resolveAndClose({
 							fullPath: null,
@@ -340,4 +333,39 @@ export async function showFilePathPrompt(
 export function setDisabled(el: HTMLElement, disabled: boolean) {
 	el.toggleClass("is-disabled", disabled);
 	el.setAttr("aria-disabled", disabled ? "true" : "false");
+}
+
+/**
+ * Suggests existing tags within the vault
+ */
+export class TagSuggest extends AbstractInputSuggest<string> {
+    constructor(
+        app: App,
+        public inputEl: HTMLInputElement,
+    ) {
+        super(app, inputEl);
+    }
+
+    getSuggestions(query: string): string[] {
+        // Get all tags from the vault and remove the '#' prefix
+        const allTags = getAllVaultTags(this.app)
+
+        // Filter tags based on the query (case-insensitive)
+        const normalizedQuery = query.toLowerCase();
+        return allTags.filter(tag =>
+            tag.toLowerCase().includes(normalizedQuery)
+        );
+    }
+
+    renderSuggestion(tag: string, el: HTMLElement): void {
+        el.createEl("div", { text: `#${tag}` });
+        el.addClass("mod-tag");
+    }
+
+    selectSuggestion(tag: string): void {
+        this.inputEl.value = `#${tag}`;
+        this.inputEl.trigger("input");
+        this.inputEl.trigger("change");
+        this.close();
+    }
 }

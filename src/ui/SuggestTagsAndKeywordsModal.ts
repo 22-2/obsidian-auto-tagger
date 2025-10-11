@@ -1,10 +1,10 @@
 import {
-	App,
-	Modal,
-	Notice,
-	Setting,
-	TFile,
-	TextAreaComponent,
+    App,
+    Modal,
+    Notice,
+    Setting,
+    TFile,
+    TextAreaComponent,
 } from "obsidian";
 import { AISuggestion } from "src/utils/types";
 
@@ -37,12 +37,12 @@ export class SuggestTagsAndKeywordsModal extends Modal {
 
 		// スクロール可能なリストコンテナを追加
 		const listContainer = contentEl.createDiv(
-			"personal-context-suggestions-list"
+			"auto-tagger-suggestions-list"
 		);
 
 		this.suggestionsState.forEach((state, index) => {
 			const container = listContainer.createDiv(
-				"personal-context-suggestion-container"
+				"auto-tagger-suggestion-container"
 			);
 			const file = this.app.vault.getAbstractFileByPath(state.path);
 			const fileName = file ? file.name : state.path;
@@ -50,7 +50,7 @@ export class SuggestTagsAndKeywordsModal extends Modal {
 			// --- Note Title (Clickable) ---
 			const titleEl = container.createEl("h4", {
 				text: fileName,
-				cls: "personal-context-suggestion-title",
+				cls: "auto-tagger-suggestion-title",
 			});
 			titleEl.addEventListener("click", () => {
 				if (file instanceof TFile) {
@@ -62,10 +62,10 @@ export class SuggestTagsAndKeywordsModal extends Modal {
 			// --- Tags Section ---
 			container.createEl("h5", {
 				text: "Suggested Tags",
-				cls: "personal-context-suggestion-section-title",
+				cls: "auto-tagger-suggestion-section-title",
 			});
 			const tagsGrid = container.createDiv(
-				"personal-context-suggestion-tags-grid"
+				"auto-tagger-suggestion-tags-grid"
 			);
 			if (state.tags.size === 0) {
 				tagsGrid.createEl("span", {
@@ -79,7 +79,7 @@ export class SuggestTagsAndKeywordsModal extends Modal {
 						""
 					)}`;
 					const tagItem = tagsGrid.createDiv(
-						"personal-context-suggestion-tag-item"
+						"auto-tagger-suggestion-tag-item"
 					);
 					const checkbox = tagItem.createEl("input", {
 						type: "checkbox",
@@ -99,10 +99,10 @@ export class SuggestTagsAndKeywordsModal extends Modal {
 			// --- Keywords Section ---
 			container.createEl("h5", {
 				text: "Suggested Keywords",
-				cls: "personal-context-suggestion-section-title",
+				cls: "auto-tagger-suggestion-section-title",
 			});
 			const keywordsContainer = container.createDiv(
-				"personal-context-suggestion-keywords"
+				"auto-tagger-suggestion-keywords"
 			);
 			new TextAreaComponent(keywordsContainer)
 				.setValue(state.keywords)

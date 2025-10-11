@@ -293,7 +293,7 @@ Exclude Note Tag: processed
 Exclude Suggestion Tags: meta, system
 System Instruction: あなたは知識管理の専門家です。ノートの内容を分析し、最も適切なタグを提案してください。
 Batch Size: 5 (default)
-Log File Path: .obsidian/plugins/personal-context/logs/auto-tag.log
+Log File Path: .obsidian/plugins/auto-tagger/logs/auto-tag.log
 Max Log File Size: 10 MB (default)
 ```
 

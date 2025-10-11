@@ -984,7 +984,7 @@ This note exists to populate the vault with tags for testing.
 		}, PLUGIN_ID);
 
 		// ログファイルの存在を確認
-		const logPath = ".obsidian/plugins/personal-context/logs/auto-tag.log";
+		const logPath = ".obsidian/plugins/auto-tagger/logs/auto-tag.log";
 		const logExists = await atPage.fileExists(logPath);
 		expect(logExists).toBe(true);
 

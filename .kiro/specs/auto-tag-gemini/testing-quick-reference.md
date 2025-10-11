@@ -57,7 +57,7 @@ After running auto-tagger:
 ### Console Debugging
 ```javascript
 // Get plugin
-const plugin = app.plugins.plugins['personal-context'];
+const plugin = app.plugins.plugins['auto-tagger'];
 
 // Check settings
 plugin.settings.autoTagger
@@ -203,7 +203,7 @@ Example:
 ## Files to Check After Testing
 
 1. **Test notes**: Verify frontmatter
-2. **Log file**: `.obsidian/plugins/personal-context/logs/auto-tag.log`
+2. **Log file**: `.obsidian/plugins/auto-tagger/logs/auto-tag.log`
 3. **Console**: No errors
 4. **Settings**: Values persisted
 

@@ -292,7 +292,7 @@ All critical errors should show Notice popups:
 ## Notes for Testers
 
 1. **Console Access**: Open Developer Tools (Ctrl+Shift+I) to view console logs
-2. **Log File Location**: Default is `.obsidian/plugins/personal-context/logs/auto-tag.log`
+2. **Log File Location**: Default is `.obsidian/plugins/auto-tagger/logs/auto-tag.log`
 3. **Notice Duration**: Errors show for 5 seconds, info for 3 seconds
 4. **UI Log**: All messages also appear in the Auto Tagger view log panel
 5. **Processing Continuation**: Most errors should not stop the entire process

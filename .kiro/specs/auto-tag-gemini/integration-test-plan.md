@@ -110,7 +110,7 @@ Create 8 test notes with varying content to test different scenarios:
 **Objective**: Verify log file is created and contains correct information
 
 **Steps**:
-1. Configure log file path: `.obsidian/plugins/personal-context/logs/auto-tag.log`
+1. Configure log file path: `.obsidian/plugins/auto-tagger/logs/auto-tag.log`
 2. Run auto-tagging on test dataset
 3. Check log file after completion
 

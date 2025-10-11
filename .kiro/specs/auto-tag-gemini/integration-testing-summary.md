@@ -329,10 +329,10 @@ Report if:
 ### Essential Commands
 ```javascript
 // Get plugin
-app.plugins.plugins['personal-context']
+app.plugins.plugins['auto-tagger']
 
 // Check settings
-app.plugins.plugins['personal-context'].settings.autoTagger
+app.plugins.plugins['auto-tagger'].settings.autoTagger
 
 // Get vault tags
 app.metadataCache.getTags()
@@ -343,7 +343,7 @@ app.vault.getMarkdownFiles().filter(f => f.path.startsWith('test-notes/'))
 
 ### Essential Files
 - Test notes: `test-notes/`
-- Log file: `.obsidian/plugins/personal-context/logs/auto-tag.log`
+- Log file: `.obsidian/plugins/auto-tagger/logs/auto-tag.log`
 - Settings: Plugin settings tab
 
 ### Essential Checks

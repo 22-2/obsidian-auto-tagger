@@ -124,7 +124,7 @@
 
 8. **ログファイルの確認** (1分)
    ```
-   操作: .obsidian/plugins/personal-context/logs/auto-tag.logを開く
+   操作: .obsidian/plugins/auto-tagger/logs/auto-tag.logを開く
    確認:
    - セッション開始が記録されている
    - 各ノートの処理結果が記録されている

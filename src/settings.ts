@@ -1,5 +1,6 @@
 import { PluginSettingTab, Setting } from "obsidian";
-import type PersonalContextPlugin from "./main";
+import type AutoTaggerPlugin from "./main";
+import { TagSuggest } from "./ui/interaction";
 
 const GEMINI_MODELS = [
 	// "gemini-2.5-pro",
@@ -9,23 +10,12 @@ const GEMINI_MODELS = [
 	"gemini-2.0-flash-lite",
 ];
 
-// --- 新しい設定インターフェース ---
+// --- 設定インターフェース ---
 export interface CommonSettings {
 	geminiApiKey: string;
 	geminiModel: string;
 	enableThinkingMode: boolean;
 	enableDebugLogging: boolean;
-}
-
-export interface AIContextSettings {
-	maxNotesToProcess: number;
-	noteSortOrder: "recent" | "random";
-	includeNoteContentInContext: boolean;
-}
-
-export interface BasesSuggesterSettings {
-	sampleSize: number;
-	// excludeExisting: boolean; // 新オプション <-- この行を削除
 }
 
 export interface AutoTaggerSettings {
@@ -38,29 +28,18 @@ export interface AutoTaggerSettings {
 	maxLogFileSize: number;
 }
 
-export interface PersonalContextSettings {
+export interface AutoTaggerSettings {
 	common: CommonSettings;
-	aiContext: AIContextSettings;
-	basesSuggester: BasesSuggesterSettings;
 	autoTagger: AutoTaggerSettings;
 }
 
-// --- 新しいデフォルト設定 ---
-export const DEFAULT_SETTINGS: PersonalContextSettings = {
+// --- デフォルト設定 ---
+export const DEFAULT_SETTINGS: AutoTaggerSettings = {
 	common: {
 		geminiApiKey: "",
 		geminiModel: GEMINI_MODELS[0],
 		enableThinkingMode: false,
 		enableDebugLogging: false,
-	},
-	aiContext: {
-		maxNotesToProcess: 100,
-		noteSortOrder: "random",
-		includeNoteContentInContext: false,
-	},
-	basesSuggester: {
-		sampleSize: 10,
-		// excludeExisting: true, // デフォルトで有効 <-- この行を削除
 	},
 	autoTagger: {
 		targetDirectory: "",
@@ -69,15 +48,15 @@ export const DEFAULT_SETTINGS: PersonalContextSettings = {
 		systemInstruction:
 			"あなたは知識管理の専門家です。ノートの内容を分析し、最も適切なタグを提案してください。",
 		batchSize: 5,
-		logFilePath: ".obsidian/plugins/personal-context/logs/auto-tag.log",
+		logFilePath: ".obsidian/plugins/auto-tagger/logs/auto-tag.log",
 		maxLogFileSize: 10,
 	},
 };
 
-export class PersonalContextSettingTab extends PluginSettingTab {
-	plugin: PersonalContextPlugin;
+export class AutoTaggerSettingTab extends PluginSettingTab {
+	plugin: AutoTaggerPlugin;
 
-	constructor(plugin: PersonalContextPlugin) {
+	constructor(plugin: AutoTaggerPlugin) {
 		super(plugin.app, plugin);
 		this.plugin = plugin;
 	}
@@ -95,8 +74,7 @@ export class PersonalContextSettingTab extends PluginSettingTab {
 			.setName("Gemini API Key")
 			.setDesc("Enter your Google AI Studio Gemini API key.")
 			.addText((text) => {
-				text
-					.setPlaceholder("Enter your API key")
+				text.setPlaceholder("Enter your API key")
 					.setValue(this.plugin.settings.common.geminiApiKey)
 					.onChange(async (value) => {
 						this.plugin.settings.common.geminiApiKey = value.trim();
@@ -153,90 +131,6 @@ export class PersonalContextSettingTab extends PluginSettingTab {
 
 		updateThinkingToggleState(this.plugin.settings.common.geminiModel);
 
-		// --- AI Context Settings Section ---
-		containerEl.createEl("h3", { text: "AI Context Settings" });
-		const aiContextDesc = containerEl.createEl("p", {
-			cls: "setting-item-description",
-		});
-		aiContextDesc.setText(
-			"Common settings for how the AI gathers context from your vault.",
-		);
-
-		new Setting(containerEl)
-			.setName("Note selection method for context")
-			.setDesc(
-				"How to select notes from your vault to provide to the AI as context (for 'Suggest related notes').",
-			)
-			.addDropdown((dropdown) => {
-				dropdown
-					.addOption("recent", "Most recently updated")
-					.addOption("random", "Randomly selected")
-					.setValue(this.plugin.settings.aiContext.noteSortOrder)
-					.onChange(async (value) => {
-						this.plugin.settings.aiContext.noteSortOrder = value as
-							| "recent"
-							| "random";
-						await this.plugin.saveSettings();
-					});
-			});
-
-		new Setting(containerEl)
-			.setName("Maximum notes to consider")
-			.setDesc(
-				"The maximum number of notes to provide as context for the AI. Affects 'Suggest related notes'.",
-			)
-			.addSlider((slider) =>
-				slider
-					.setLimits(10, 500, 10)
-					.setValue(this.plugin.settings.aiContext.maxNotesToProcess)
-					.setDynamicTooltip()
-					.onChange(async (value) => {
-						this.plugin.settings.aiContext.maxNotesToProcess = value;
-						await this.plugin.saveSettings();
-					}),
-			);
-
-		new Setting(containerEl)
-			.setName("Include note content in context")
-			.setDesc(
-				"ON: Include other notes' content for more accuracy (higher API cost). OFF: Use only metadata (faster, lower cost).",
-			)
-			.addToggle((toggle) =>
-				toggle
-					.setValue(this.plugin.settings.aiContext.includeNoteContentInContext)
-					.onChange(async (value) => {
-						this.plugin.settings.aiContext.includeNoteContentInContext = value;
-						await this.plugin.saveSettings();
-					}),
-			);
-
-		// --- Bases Suggester Section ---
-		containerEl.createEl("h3", { text: "Suggest for Bases View" });
-		const basesSuggesterDesc = containerEl.createEl("p", {
-			cls: "setting-item-description",
-		});
-		basesSuggesterDesc.setText(
-			"Settings for the 'Suggest tags & keywords for notes in Bases view' command.",
-		);
-
-		new Setting(containerEl)
-			.setName("Number of notes to process")
-			.setDesc(
-				"The number of notes to sample from the Bases view for analysis, prioritizing those with fewer tags.",
-			)
-			.addSlider((slider) =>
-				slider
-					.setLimits(1, 30, 1)
-					.setValue(this.plugin.settings.basesSuggester.sampleSize)
-					.setDynamicTooltip()
-					.onChange(async (value) => {
-						this.plugin.settings.basesSuggester.sampleSize = value;
-						await this.plugin.saveSettings();
-					}),
-			);
-
-		// --- ここから "Exclude notes" の設定を削除 ---
-
 		// --- Auto Tagger Section ---
 		containerEl.createEl("h3", { text: "Auto Tagger Settings" });
 		const autoTaggerDesc = containerEl.createEl("p", {
@@ -256,7 +150,8 @@ export class PersonalContextSettingTab extends PluginSettingTab {
 					.setPlaceholder("notes/")
 					.setValue(this.plugin.settings.autoTagger.targetDirectory)
 					.onChange(async (value) => {
-						this.plugin.settings.autoTagger.targetDirectory = value.trim();
+						this.plugin.settings.autoTagger.targetDirectory =
+							value.trim();
 						await this.plugin.saveSettings();
 					}),
 			);
@@ -266,35 +161,44 @@ export class PersonalContextSettingTab extends PluginSettingTab {
 			.setDesc(
 				"Notes with this tag will be excluded from auto-tagging (e.g., 'processed').",
 			)
-			.addText((text) =>
-				text
+			.addSearch((search) => {
+				search
 					.setPlaceholder("processed")
 					.setValue(this.plugin.settings.autoTagger.excludeNoteTag)
 					.onChange(async (value) => {
-						this.plugin.settings.autoTagger.excludeNoteTag = value.trim();
+						// Remove '#' prefix if present
+						const cleanValue = value.replace(/^#+/, "").trim();
+						this.plugin.settings.autoTagger.excludeNoteTag =
+							cleanValue;
 						await this.plugin.saveSettings();
-					}),
-			);
+					});
+				new TagSuggest(this.app, search.inputEl);
+			});
 
 		new Setting(containerEl)
 			.setName("Exclude suggestion tags")
 			.setDesc(
-				"Comma-separated list of tags to exclude from AI suggestions (e.g., 'meta, system, private').",
+				"Comma-separated list of tags to exclude from AI suggestions (e.g., 'meta, system, private'). Use the autocomplete to select tags.",
 			)
-			.addText((text) =>
-				text
+			.addSearch((search) => {
+				search
 					.setPlaceholder("meta, system")
 					.setValue(
-						this.plugin.settings.autoTagger.excludeSuggestionTags.join(", "),
+						this.plugin.settings.autoTagger.excludeSuggestionTags.join(
+							", ",
+						),
 					)
 					.onChange(async (value) => {
-						this.plugin.settings.autoTagger.excludeSuggestionTags = value
-							.split(",")
-							.map((tag) => tag.trim())
-							.filter((tag) => tag.length > 0);
+						// Remove '#' prefix from each tag if present
+						this.plugin.settings.autoTagger.excludeSuggestionTags =
+							value
+								.split(",")
+								.map((tag) => tag.replace(/^#+/, "").trim())
+								.filter((tag) => tag.length > 0);
 						await this.plugin.saveSettings();
-					}),
-			);
+					});
+				new TagSuggest(this.app, search.inputEl);
+			});
 
 		new Setting(containerEl)
 			.setName("System instruction")
@@ -302,11 +206,11 @@ export class PersonalContextSettingTab extends PluginSettingTab {
 				"Custom instruction for the AI to guide tagging behavior. This will be sent with each request.",
 			)
 			.addTextArea((text) => {
-				text
-					.setPlaceholder("Enter custom instructions for the AI...")
+				text.setPlaceholder("Enter custom instructions for the AI...")
 					.setValue(this.plugin.settings.autoTagger.systemInstruction)
 					.onChange(async (value) => {
-						this.plugin.settings.autoTagger.systemInstruction = value;
+						this.plugin.settings.autoTagger.systemInstruction =
+							value;
 						await this.plugin.saveSettings();
 					});
 				text.inputEl.rows = 4;
@@ -321,11 +225,12 @@ export class PersonalContextSettingTab extends PluginSettingTab {
 			.addText((text) =>
 				text
 					.setPlaceholder(
-						".obsidian/plugins/personal-context/logs/auto-tag.log",
+						".obsidian/plugins/auto-tagger/logs/auto-tag.log",
 					)
 					.setValue(this.plugin.settings.autoTagger.logFilePath)
 					.onChange(async (value) => {
-						this.plugin.settings.autoTagger.logFilePath = value.trim();
+						this.plugin.settings.autoTagger.logFilePath =
+							value.trim();
 						await this.plugin.saveSettings();
 					}),
 			);

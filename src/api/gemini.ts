@@ -1,5 +1,5 @@
 import { requestUrl } from "obsidian";
-import type { PersonalContextSettings } from "src/settings";
+import type { AutoTaggerSettings } from "src/settings";
 import type { AutoTagBatchNote } from "src/utils/types";
 
 /**
@@ -10,7 +10,7 @@ import type { AutoTagBatchNote } from "src/utils/types";
  */
 export async function callGeminiApi(
 	prompt: string,
-	settings: PersonalContextSettings
+	settings: AutoTaggerSettings
 ): Promise<string> {
 	const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${settings.common.geminiModel}:generateContent?key=${settings.common.geminiApiKey}`;
 

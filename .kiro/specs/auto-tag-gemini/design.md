@@ -56,7 +56,7 @@ graph TD
 
 ### 1. Settings Extension
 
-既存の`PersonalContextSettings`インターフェースに新しい設定セクションを追加します。
+既存の`AutoTaggerSettings`インターフェースに新しい設定セクションを追加します。
 
 ```typescript
 export interface AutoTaggerSettings {
@@ -69,7 +69,7 @@ export interface AutoTaggerSettings {
     maxLogFileSize: number;               // ログファイル最大サイズ（MB）
 }
 
-export interface PersonalContextSettings {
+export interface AutoTaggerSettings {
     common: CommonSettings;
     aiContext: AIContextSettings;
     basesSuggester: BasesSuggesterSettings;

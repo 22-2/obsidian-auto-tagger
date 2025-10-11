@@ -153,7 +153,10 @@ export class AutoTagger {
 						} catch (error) {
 							// ファイル操作エラー (Requirement 4.6)
 							this.state.errorCount++;
-							const errorMsg = error instanceof Error ? error.message : String(error);
+							const errorMsg =
+								error instanceof Error
+									? error.message
+									: String(error);
 
 							// エラーをログに記録
 							await this.logger.log({
@@ -218,7 +221,10 @@ export class AutoTagger {
 			for (const note of notes) {
 				try {
 					const content = await this.app.vault.cachedRead(note);
-					const frontmatter = await getFrontmatterAsync(this.app, note);
+					const frontmatter = await getFrontmatterAsync(
+						this.app,
+						note,
+					);
 					const existingTags = (frontmatter?.tags || []) as string[];
 
 					batchNotes.push({
@@ -229,7 +235,8 @@ export class AutoTagger {
 					});
 				} catch (error) {
 					// ファイル読み込みエラー (Requirement 4.6)
-					const errorMsg = error instanceof Error ? error.message : String(error);
+					const errorMsg =
+						error instanceof Error ? error.message : String(error);
 					console.error(`Failed to read note ${note.path}:`, error);
 					results.push({
 						path: note.path,
@@ -257,13 +264,12 @@ export class AutoTagger {
 			try {
 				responseText = await callGeminiApi(prompt, {
 					common: this.geminiSettings,
-					aiContext: {} as any,
-					basesSuggester: {} as any,
 					autoTagger: this.settings,
 				});
 			} catch (error) {
 				// API呼び出しエラー (Requirement 2.5, 4.6)
-				const errorMsg = error instanceof Error ? error.message : String(error);
+				const errorMsg =
+					error instanceof Error ? error.message : String(error);
 				console.error("Gemini API call failed:", error);
 
 				// ユーザーに通知
@@ -271,7 +277,7 @@ export class AutoTagger {
 
 				// 全ノートを失敗として記録
 				for (const note of batchNotes) {
-					if (!results.find(r => r.path === note.path)) {
+					if (!results.find((r) => r.path === note.path)) {
 						results.push({
 							path: note.path,
 							suggestedTags: [],
@@ -289,7 +295,8 @@ export class AutoTagger {
 				response = JSON.parse(responseText);
 			} catch (error) {
 				// JSONパースエラー (Requirement 2.5)
-				const errorMsg = error instanceof Error ? error.message : String(error);
+				const errorMsg =
+					error instanceof Error ? error.message : String(error);
 				console.error("Failed to parse API response:", error);
 				console.error("Response text:", responseText);
 
@@ -298,7 +305,7 @@ export class AutoTagger {
 
 				// 全ノートを失敗として記録
 				for (const note of batchNotes) {
-					if (!results.find(r => r.path === note.path)) {
+					if (!results.find((r) => r.path === note.path)) {
 						results.push({
 							path: note.path,
 							suggestedTags: [],
@@ -317,7 +324,7 @@ export class AutoTagger {
 
 				// 全ノートを失敗として記録
 				for (const note of batchNotes) {
-					if (!results.find(r => r.path === note.path)) {
+					if (!results.find((r) => r.path === note.path)) {
 						results.push({
 							path: note.path,
 							suggestedTags: [],
@@ -339,13 +346,14 @@ export class AutoTagger {
 			}
 		} catch (error) {
 			// 予期しないエラー (Requirement 4.6)
-			const errorMsg = error instanceof Error ? error.message : String(error);
+			const errorMsg =
+				error instanceof Error ? error.message : String(error);
 			console.error("Unexpected error in processBatch:", error);
 			new Notice(`予期しないエラー: ${errorMsg}`, 5000);
 
 			// エラーが発生した場合、全ノートを失敗として記録
 			for (const note of notes) {
-				if (!results.find(r => r.path === note.path)) {
+				if (!results.find((r) => r.path === note.path)) {
 					results.push({
 						path: note.path,
 						suggestedTags: [],
@@ -371,26 +379,32 @@ export class AutoTagger {
 		}
 
 		try {
-			await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
-				// 既存のタグを取得
-				let existingTags: string[] = [];
-				if (frontmatter.tags) {
-					if (Array.isArray(frontmatter.tags)) {
-						existingTags = frontmatter.tags;
-					} else if (typeof frontmatter.tags === "string") {
-						existingTags = [frontmatter.tags];
+			await this.app.fileManager.processFrontMatter(
+				file,
+				(frontmatter) => {
+					// 既存のタグを取得
+					let existingTags: string[] = [];
+					if (frontmatter.tags) {
+						if (Array.isArray(frontmatter.tags)) {
+							existingTags = frontmatter.tags;
+						} else if (typeof frontmatter.tags === "string") {
+							existingTags = [frontmatter.tags];
+						}
 					}
-				}
 
-				// 新しいタグを追加（重複を除外）
-				const newTags = tags.filter((tag) => !existingTags.includes(tag));
-				if (newTags.length > 0) {
-					frontmatter.tags = [...existingTags, ...newTags];
-				}
-			});
+					// 新しいタグを追加（重複を除外）
+					const newTags = tags.filter(
+						(tag) => !existingTags.includes(tag),
+					);
+					if (newTags.length > 0) {
+						frontmatter.tags = [...existingTags, ...newTags];
+					}
+				},
+			);
 		} catch (error) {
 			// ファイル操作エラー (Requirement 4.6)
-			const errorMsg = error instanceof Error ? error.message : String(error);
+			const errorMsg =
+				error instanceof Error ? error.message : String(error);
 			console.error(`Failed to apply tags to ${file.path}:`, error);
 			throw new Error(`タグ適用エラー: ${errorMsg}`);
 		}

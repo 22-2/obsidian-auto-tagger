@@ -1,10 +1,10 @@
 import {
-	App,
-	Modal,
-	Notice,
-	Setting,
-	TextAreaComponent,
-	TFile,
+    App,
+    Modal,
+    Notice,
+    Setting,
+    TextAreaComponent,
+    TFile,
 } from "obsidian";
 
 type LinkStyle = "wikilink" | "markdown" | "none";
@@ -43,7 +43,7 @@ export class RelatedNotesModal extends Modal {
 		this.textArea.inputEl.style.height = "200px";
 		this.textArea.inputEl.style.minHeight = "100px";
 		this.textArea.inputEl.readOnly = true;
-		contentEl.addClass("personal-context-modal-content");
+		contentEl.addClass("auto-tagger-modal-content");
 
 		// --- Options ---
 		new Setting(contentEl)
@@ -91,7 +91,7 @@ export class RelatedNotesModal extends Modal {
 
 		// --- Buttons ---
 		new Setting(contentEl)
-			.setClass("personal-context-modal-buttons")
+			.setClass("auto-tagger-modal-buttons")
 			.addButton((button) =>
 				button
 					.setButtonText("Copy results")
