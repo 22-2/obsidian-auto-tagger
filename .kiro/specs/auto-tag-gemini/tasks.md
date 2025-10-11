@@ -59,27 +59,27 @@
   - 状態管理（isRunning、shouldStop）
   - _Requirements: 4.4, 4.5, 7.4, 7.5_
 
-- [ ] 6. AutoTagView Svelteコンポーネントの実装
-- [ ] 6.1 基本UIレイアウトを作成
+- [x] 6. AutoTagView Svelteコンポーネントの実装
+- [x] 6.1 基本UIレイアウトを作成
   - `src/view/AutoTagView.svelte`を作成
   - 設定入力フィールド（対象ディレクトリ、除外タグ、system instruction）
   - 開始/停止ボタン
   - _Requirements: 6.1, 6.3, 6.4_
 
-- [ ] 6.2 進捗表示とログ表示を実装
+- [x] 6.2 進捗表示とログ表示を実装
   - 進捗バーまたはカウンター（処理済み/全体）
   - リアルタイムログ表示エリア
   - 現在処理中のノート名表示
   - _Requirements: 6.2, 6.5, 6.6, 4.7_
 
-- [ ] 6.3 AutoTaggerサービスとの統合
+- [x] 6.3 AutoTaggerサービスとの統合
   - 開始ボタンクリック時にAutoTagger.start()を呼び出し
   - 停止ボタンクリック時にAutoTagger.stop()を呼び出し
   - 進捗コールバックでUIを更新
   - バッチ完了コールバックでログを追加
   - _Requirements: 4.1, 4.4_
 
-- [ ] 6.4 サマリー表示を実装
+- [x] 6.4 サマリー表示を実装
   - 処理完了時にサマリーを表示
   - 中断時も途中までのサマリーを表示
   - _Requirements: 7.4, 7.5_
