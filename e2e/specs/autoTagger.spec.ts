@@ -61,8 +61,6 @@ test.describe("AutoTagger Service", () => {
 				);
 			}
 
-			console.log("1111111111111111111111", plugin.manifest.id);
-
 			// プラグインからAutoTaggerインスタンスを作成
 			const autoTagger = plugin.createAutoTagger();
 
