@@ -145,7 +145,24 @@ Exclude Suggestion Tags: ${excludeSuggestionTags.length > 0 ? excludeSuggestionT
 				// 新規ファイルを作成
 				// ディレクトリが存在しない場合は作成
 				await this.ensureDirectoryExists();
-				await vault.create(this.logFilePath, content);
+
+				try {
+					await vault.create(this.logFilePath, content);
+				} catch (createError) {
+					// "File already exists"エラーの場合は、ファイルを取得して追記
+					const errorMsg = createError instanceof Error ? createError.message : String(createError);
+					if (errorMsg.includes("File already exists") || errorMsg.includes("already exists")) {
+						const existingFile = vault.getAbstractFileByPath(this.logFilePath);
+						if (existingFile instanceof TFile) {
+							const existingContent = await vault.read(existingFile);
+							await vault.modify(existingFile, existingContent + content);
+						} else {
+							throw createError;
+						}
+					} else {
+						throw createError;
+					}
+				}
 			}
 		} catch (error) {
 			// ファイル操作エラーを上位に伝播
@@ -195,8 +212,11 @@ Exclude Suggestion Tags: ${excludeSuggestionTags.length > 0 ? excludeSuggestionT
 				try {
 					await this.app.vault.createFolder(currentPath);
 				} catch (error) {
+					// "Folder already exists" エラーは無視
 					const errorMsg = error instanceof Error ? error.message : String(error);
-					throw new Error(`フォルダ作成エラー (${currentPath}): ${errorMsg}`);
+					if (!errorMsg.includes("Folder already exists")) {
+						throw new Error(`フォルダ作成エラー (${currentPath}): ${errorMsg}`);
+					}
 				}
 			}
 		}

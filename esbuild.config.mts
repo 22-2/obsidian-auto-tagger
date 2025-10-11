@@ -73,7 +73,7 @@ const context = await esbuild.context({
 				esbuildSvelte({
 			compilerOptions: {
 				css: "injected",
-				warningFilter: (warning) => !warning.code.startsWith("a11y"), // a11y-から始まる警告をすべて無視
+				// warningFilter: (warning) => !warning.code.startsWith("a11y"), // a11y-から始まる警告をすべて無視
 			},
 			preprocess: sveltePreprocess(),
 		}),

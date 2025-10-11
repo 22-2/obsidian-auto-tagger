@@ -15,7 +15,11 @@
         "format": "pnpm dlx prettier --write .",
         "test:e2e": "playwright test",
         "test:e2e:example": "pnpm playwright test e2e/specs/example.spec.ts --project=chromium",
-        "test:e2e:debug": "cross-env DEBUG=pw:api playwright test"
+        "test:e2e:debug": "cross-env DEBUG=pw:api playwright test",
+        "test:e2e:auto-tagger": "playwright test e2e/specs/autoTagger.spec.ts --project=chromium",
+        "test:e2e:auto-tagger-journey": "playwright test e2e/specs/autoTagger.e2e.spec.ts --project=chromium",
+        "test:e2e:ui": "playwright test --ui",
+        "test:e2e:headed": "playwright test --headed"
     },
     "keywords": [],
     "author": "",

@@ -1,12 +1,11 @@
 import { ItemView, WorkspaceLeaf } from "obsidian";
-import AppComponent from "./App.svelte";
 import type MyPlugin from "../main";
-import { mount, unmount } from "svelte";
+import AppComponent from "./App.svelte";
 
 export const VIEW_TYPE = "svelte-view";
 
 export class SvelteView extends ItemView {
-	component: ReturnType<typeof mount> | null = null;
+	component: AppComponent | null = null;
 	plugin: MyPlugin;
 
 	constructor(leaf: WorkspaceLeaf, plugin: MyPlugin) {
@@ -23,13 +22,18 @@ export class SvelteView extends ItemView {
 	}
 
 	async onOpen() {
-		this.component = mount(AppComponent, {
+		this.component = new AppComponent({
 			target: this.contentEl,
-			props: {},
+			props: {
+				plugin: this.plugin,
+			},
 		});
 	}
 
 	async onClose() {
-		this.component && unmount(this.component);
+		if (this.component) {
+			this.component.$destroy();
+			this.component = null;
+		}
 	}
 }

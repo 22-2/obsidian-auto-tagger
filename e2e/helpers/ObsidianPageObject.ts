@@ -23,7 +23,7 @@ export class ObsidianPageObject {
 	constructor(
 		protected page: Page,
 		protected pluginHandleMap?: VaultPageTextContext["pluginHandleMap"],
-		protected config: PageObjectConfig = {}
+		protected config: PageObjectConfig = {},
 	) {}
 
 	// ===== セレクタヘルパー =====
@@ -34,7 +34,7 @@ export class ObsidianPageObject {
 
 	protected getActiveView(type: string): string {
 		return `${this.ACTIVE_LEAF} > .workspace-leaf-content${this.getDatatype(
-			type
+			type,
 		)}`;
 	}
 
@@ -82,11 +82,11 @@ export class ObsidianPageObject {
 
 	async rebuildReferences(
 		vaultOptions: VaultOptions,
-		getPluginHandleMapFn: (page: Page, plugins: any[]) => Promise<any>
+		getPluginHandleMapFn: (page: Page, plugins: any[]) => Promise<any>,
 	): Promise<void> {
 		this.pluginHandleMap = await getPluginHandleMapFn(
 			this.page,
-			vaultOptions.plugins || []
+			vaultOptions.plugins || [],
 		);
 	}
 
@@ -94,8 +94,8 @@ export class ObsidianPageObject {
 
 	async runCommand(commandId: string): Promise<void> {
 		const success = await this.page.evaluate(
-			(id) => app.commands.executeCommandById(id),
-			commandId
+			(id) => (window as any).app.commands.executeCommandById(id),
+			commandId,
 		);
 		expect(success).toBe(true);
 	}
@@ -110,13 +110,19 @@ export class ObsidianPageObject {
 
 	async splitVertically(): Promise<void> {
 		await this.page.evaluate(() =>
-			app.workspace.duplicateLeaf(app.workspace.activeLeaf!, "vertical")
+			(window as any).app.workspace.duplicateLeaf(
+				(window as any).app.workspace.activeLeaf!,
+				"vertical",
+			),
 		);
 	}
 
 	async splitHorizontally(): Promise<void> {
 		await this.page.evaluate(() =>
-			app.workspace.duplicateLeaf(app.workspace.activeLeaf!, "horizontal")
+			(window as any).app.workspace.duplicateLeaf(
+				(window as any).app.workspace.activeLeaf!,
+				"horizontal",
+			),
 		);
 	}
 
@@ -128,7 +134,7 @@ export class ObsidianPageObject {
 	async clickCloseButtonOnActiveTab(): Promise<void> {
 		// アクティブなタブヘッダーの中にある .workspace-tab-header-inner-close-button を探す
 		const closeButton = this.page.locator(
-			`${this.ACTIVE_TAB_HEADER} .workspace-tab-header-inner-close-button`
+			`${this.ACTIVE_TAB_HEADER} .workspace-tab-header-inner-close-button`,
 		);
 		await expect(closeButton).toBeVisible();
 		await closeButton.click();
@@ -140,21 +146,25 @@ export class ObsidianPageObject {
 
 	async goBackInHistory(): Promise<void> {
 		await this.page.evaluate(() =>
-			app.workspace.activeLeaf?.history.back()
+			(window as any).app.workspace.activeLeaf?.history.back(),
 		);
 	}
 
 	async goForwardInHistory(): Promise<void> {
 		await this.page.evaluate(() =>
-			app.workspace.activeLeaf?.history.forward()
+			(window as any).app.workspace.activeLeaf?.history.forward(),
 		);
 	}
 
 	async switchToLeafIndex(index: number): Promise<void> {
 		await this.page.evaluate((i) => {
-			const leaves = app.workspace.getLeavesOfType("markdown");
+			const leaves = (window as any).app.workspace.getLeavesOfType(
+				"markdown",
+			);
 			if (leaves[i]) {
-				app.workspace.setActiveLeaf(leaves[i], { focus: true });
+				(window as any).app.workspace.setActiveLeaf(leaves[i], {
+					focus: true,
+				});
 			}
 		}, index);
 	}
@@ -162,29 +172,58 @@ export class ObsidianPageObject {
 	// ===== ファイル操作 =====
 
 	async fileExists(path: string): Promise<boolean> {
-		return this.page.evaluate((p) => app.vault.adapter.exists(p), path);
+		return this.page.evaluate(
+			(p) => (window as any).app.vault.adapter.exists(p),
+			path,
+		);
 	}
 
 	async readFile(path: string): Promise<string> {
-		return this.page.evaluate((p) => app.vault.adapter.read(p), path);
+		return this.page.evaluate(
+			(p) => (window as any).app.vault.adapter.read(p),
+			path,
+		);
 	}
 
 	async writeFile(path: string, content: string): Promise<void> {
-		await this.page.evaluate(([p, c]) => app.vault.adapter.write(p, c), [
-			path,
-			content,
-		] as const);
+		await this.page.evaluate(
+			async ([p, c]) => {
+				// ディレクトリパスを取得
+				const dirPath = p.substring(0, p.lastIndexOf("/"));
+
+				// ディレクトリが存在しない場合は作成
+				if (dirPath && !(await (window as any).app.vault.adapter.exists(dirPath))) {
+					// 親ディレクトリから順に作成
+					const parts = dirPath.split("/");
+					let currentPath = "";
+
+					for (const part of parts) {
+						currentPath = currentPath ? `${currentPath}/${part}` : part;
+						if (!(await (window as any).app.vault.adapter.exists(currentPath))) {
+							await (window as any).app.vault.adapter.mkdir(currentPath);
+						}
+					}
+				}
+
+				// ファイルを書き込み
+				await (window as any).app.vault.adapter.write(p, c);
+			},
+			[path, content] as const,
+		);
 	}
 
 	async deleteFile(path: string): Promise<void> {
-		await this.page.evaluate((p) => app.vault.adapter.remove(p), path);
+		await this.page.evaluate(
+			(p) => (window as any).app.vault.adapter.remove(p),
+			path,
+		);
 	}
 
 	async openFile(path: string): Promise<void> {
 		await this.page.evaluate(async (p) => {
-			const file = app.vault.getAbstractFileByPath(p);
+			const file = (window as any).app.vault.getAbstractFileByPath(p);
 			if (file) {
-				await app.workspace.getLeaf().openFile(file as any);
+				await (window as any).app.workspace.getLeaf().openFile(file as any);
 			}
 		}, path);
 	}
@@ -193,35 +232,37 @@ export class ObsidianPageObject {
 
 	async getActiveFileContent(): Promise<string | undefined> {
 		return this.page.evaluate(() =>
-			app.workspace.activeEditor?.editor?.getValue()
+			(window as any).app.workspace.activeEditor?.editor?.getValue(),
 		);
 	}
 
 	async getActiveFilePath(): Promise<string | null> {
 		return this.page.evaluate(
-			() => app.workspace.getActiveFile()?.path ?? null
+			() => (window as any).app.workspace.getActiveFile()?.path ?? null,
 		);
 	}
 
 	async getTabInnerTitle(): Promise<string | null> {
 		return this.page.evaluate(
 			() =>
-				app.workspace.activeLeaf?.tabHeaderInnerTitleEl.textContent ??
-				null
+				(window as any).app.workspace.activeLeaf?.tabHeaderInnerTitleEl
+					.textContent ?? null,
 		);
 	}
 
 	async getActiveViewType(): Promise<string | null> {
 		return this.page.evaluate(
-			() => app.workspace.activeLeaf?.view.getViewType() ?? null
+			() =>
+				(window as any).app.workspace.activeLeaf?.view.getViewType() ??
+				null,
 		);
 	}
 
 	async getOpenFiles(): Promise<string[]> {
 		return this.page.evaluate(() =>
-			app.workspace
+			(window as any).app.workspace
 				.getLeavesOfType("markdown")
-				.map((leaf: any) => leaf.view.file?.path ?? "")
+				.map((leaf: any) => leaf.view.file?.path ?? ""),
 		);
 	}
 
@@ -233,36 +274,40 @@ export class ObsidianPageObject {
 		}
 		return this.pluginHandleMap.evaluateHandle(
 			(map, id) => map.get(id) as T,
-			pluginId
+			pluginId,
 		);
 	}
 
 	async isPluginEnabled(pluginId: string): Promise<boolean> {
 		return this.page.evaluate(
-			(id) => !!app.plugins.enabledPlugins.has(id),
-			pluginId
+			(id) => !!(window as any).app.plugins.enabledPlugins.has(id),
+			pluginId,
 		);
 	}
 
 	// ===== 待機・同期 =====
 
 	async waitForLayoutReady(): Promise<void> {
-		await this.page.waitForFunction(() => app.workspace.layoutReady);
+		await this.page.waitForFunction(
+			() => (window as any).app.workspace.layoutReady,
+		);
 	}
 
 	async waitForFileCreated(path: string, timeout = 5000): Promise<void> {
 		await this.page.waitForFunction(
-			(p) => app.vault.adapter.exists(p),
+			(p) => (window as any).app.vault.adapter.exists(p),
 			path,
-			{ timeout }
+			{ timeout },
 		);
 	}
 
 	async waitForViewType(viewType: string, timeout = 5000): Promise<void> {
 		await this.page.waitForFunction(
-			(type) => app.workspace.activeLeaf?.view.getViewType() === type,
+			(type) =>
+				(window as any).app.workspace.activeLeaf?.view.getViewType() ===
+				type,
 			viewType,
-			{ timeout }
+			{ timeout },
 		);
 	}
 
@@ -278,7 +323,7 @@ export class ObsidianPageObject {
 
 	async expectActiveTitleToContain(
 		viewType: string,
-		text: string
+		text: string,
 	): Promise<void> {
 		await expect(this.getTitleByType(viewType)).toContainText(text);
 	}
@@ -317,7 +362,7 @@ export class CustomViewPageObject extends ObsidianPageObject {
 	constructor(
 		page: Page,
 		private customViewType: string,
-		pluginHandleMap?: VaultPageTextContext["pluginHandleMap"]
+		pluginHandleMap?: VaultPageTextContext["pluginHandleMap"],
 	) {
 		super(page, pluginHandleMap, { viewType: customViewType });
 	}
