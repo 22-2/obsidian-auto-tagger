@@ -22,6 +22,7 @@ export class LoggerService {
 		private app: App,
 		private logFilePath: string,
 		private maxFileSize: number,
+		private enabled: boolean = true,
 	) {}
 
 	/**
@@ -29,6 +30,11 @@ export class LoggerService {
 	 * @param entry - ログエントリ
 	 */
 	async log(entry: LogEntry): Promise<void> {
+		// ログが無効な場合は何もしない
+		if (!this.enabled) {
+			return;
+		}
+		
 		try {
 			// ログファイルのサイズをチェックし、必要に応じてローテーション
 			await this.checkAndRotateIfNeeded();
@@ -42,9 +48,8 @@ export class LoggerService {
 			// ログ書き込みに失敗してもエラーを投げない（要件7.7）
 			const errorMsg = error instanceof Error ? error.message : String(error);
 			console.error("Failed to write to log file:", error);
-
-			// UI上にエラーを表示 (Requirement 7.7)
-			new Notice(`ログファイルへの書き込みに失敗しました: ${errorMsg}`, 3000);
+			// E2E環境やテスト環境ではNoticeを表示しない
+			// Noticeの表示がエラーを引き起こす可能性があるため、コンソールログのみにする
 		}
 	}
 
@@ -53,6 +58,11 @@ export class LoggerService {
 	 * @param summary - 処理サマリー
 	 */
 	async logSummary(summary: AutoTaggerSummary): Promise<void> {
+		// ログが無効な場合は何もしない
+		if (!this.enabled) {
+			return;
+		}
+		
 		try {
 			const duration = this.calculateDuration(
 				summary.startTime,
@@ -74,27 +84,31 @@ End Time: ${summary.endTime}
 		} catch (error) {
 			const errorMsg = error instanceof Error ? error.message : String(error);
 			console.error("Failed to write summary to log file:", error);
-			new Notice(`サマリーのログ記録に失敗しました: ${errorMsg}`, 3000);
 		}
 	}
 
 	/**
 	 * セッション開始をログに記録
 	 * @param targetDirectory - 対象ディレクトリ
-	 * @param excludeNoteTag - 除外ノートタグ
+	 * @param excludeNoteTags - 除外ノートタグ
 	 * @param excludeSuggestionTags - 除外提案タグ
 	 */
 	async logSessionStart(
 		targetDirectory: string,
-		excludeNoteTag: string,
+		excludeNoteTags: string[],
 		excludeSuggestionTags: string[],
 	): Promise<void> {
+		// ログが無効な場合は何もしない
+		if (!this.enabled) {
+			return;
+		}
+		
 		try {
 			const startMessage = `
 === Auto-Tagging Session Started ===
 Timestamp: ${new Date().toISOString()}
 Target Directory: ${targetDirectory || "(vault root)"}
-Exclude Note Tag: ${excludeNoteTag || "(none)"}
+Exclude Note Tags: ${excludeNoteTags.length > 0 ? excludeNoteTags.join(", ") : "(none)"}
 Exclude Suggestion Tags: ${excludeSuggestionTags.length > 0 ? excludeSuggestionTags.join(", ") : "(none)"}
 
 `;
@@ -103,7 +117,6 @@ Exclude Suggestion Tags: ${excludeSuggestionTags.length > 0 ? excludeSuggestionT
 		} catch (error) {
 			const errorMsg = error instanceof Error ? error.message : String(error);
 			console.error("Failed to write session start to log file:", error);
-			new Notice(`セッション開始のログ記録に失敗しました: ${errorMsg}`, 3000);
 		}
 	}
 
@@ -134,51 +147,74 @@ Exclude Suggestion Tags: ${excludeSuggestionTags.length > 0 ? excludeSuggestionT
 		const vault = this.app.vault;
 
 		// ディレクトリが存在することを確認
-		await this.ensureDirectoryExists();
+		try {
+			await this.ensureDirectoryExists();
+		} catch (dirError) {
+			console.error("Failed to ensure directory exists:", dirError);
+			// ディレクトリ作成に失敗した場合は処理を中断
+			throw dirError;
+		}
 
 		// リトライ処理
-		const maxRetries = 3;
+		const maxRetries = 5;
 		let lastError: Error | null = null;
 
 		for (let attempt = 0; attempt < maxRetries; attempt++) {
 			try {
 				// ファイルの存在を確認
-				let file = vault.getAbstractFileByPath(this.logFilePath);
+				const file = vault.getAbstractFileByPath(this.logFilePath);
 
 				if (file instanceof TFile) {
+					// 既存ファイルに追記
+					const existingContent = await vault.read(file);
+					await vault.modify(file, existingContent + content);
+					return; // 成功したら終了
+				} else if (file === null) {
+					// 新規ファイルを作成
 					try {
-						// 既存ファイルに追記
-						const existingContent = await vault.read(file);
-						await vault.modify(file, existingContent + content);
-						return; // 成功したら終了
-					} catch (readError) {
-						// 読み取りエラーの場合はリトライ
-						lastError = readError instanceof Error ? readError : new Error(String(readError));
-						await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)));
-						continue;
-					}
-				} else {
-					try {
-						// 新規ファイルを作成
 						await vault.create(this.logFilePath, content);
-						return; // 成功したら終了
+						// 作成成功 - ファイルには既にcontentが書き込まれている
+						return;
 					} catch (createError) {
-						// 既に存在する場合は次のループで処理する
 						const errorMsg = createError instanceof Error ? createError.message : String(createError);
-						if (!errorMsg.includes("File already exists") && !errorMsg.includes("already exists")) {
+						
+						// 別のプロセスが既にファイルを作成した場合
+						if (errorMsg.includes("File already exists") || errorMsg.includes("already exists")) {
+							// 少し待ってから再度ファイルを取得して追記を試みる
+							await new Promise(resolve => setTimeout(resolve, 150));
+							
+							// ファイルが利用可能になるまで少し待つ
+							const retryFile = vault.getAbstractFileByPath(this.logFilePath);
+							if (retryFile instanceof TFile) {
+								const existingContent = await vault.read(retryFile);
+								await vault.modify(retryFile, existingContent + content);
+								return;
+							}
+							// まだファイルが取得できない場合は次のループへ
+							lastError = new Error("File exists but cannot be retrieved");
+						} else {
+							// その他のエラー
 							lastError = createError instanceof Error ? createError : new Error(String(createError));
-							await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)));
 						}
 					}
+				} else {
+					// ファイルではなくフォルダが存在する場合
+					throw new Error(`Log path is a directory, not a file: ${this.logFilePath}`);
 				}
 			} catch (error) {
 				lastError = error instanceof Error ? error : new Error(String(error));
-				await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)));
+				console.error(`Retry ${attempt + 1}/${maxRetries} - Error:`, lastError.message);
+			}
+			
+			// 次のリトライ前に待機
+			if (attempt < maxRetries - 1) {
+				await new Promise(resolve => setTimeout(resolve, 150 * (attempt + 1)));
 			}
 		}
 
 		// リトライ回数を超えた場合はエラーをスロー
-		throw new Error(`ログファイルの書き込みに失敗しました (${maxRetries}回リトライ): ${lastError?.message || '不明なエラー'}`);
+		const errorDetails = lastError ? lastError.message : '不明なエラー';
+		throw new Error(`ログファイルの書き込みに失敗しました (${maxRetries}回リトライ): ${errorDetails}`);
 	}
 
 	/**

@@ -45,6 +45,9 @@ export class AutoTagger {
 	private state: AutoTaggerState;
 	private logger: LoggerService;
 	private startTime: string;
+	
+	// テスト用: API呼び出し関数をオーバーライド可能にする
+	public apiCallFn: (prompt: string, settings: AutoTaggerSettings) => Promise<string>;
 
 	constructor(
 		private app: App,
@@ -67,9 +70,13 @@ export class AutoTagger {
 			this.app,
 			this.settings.logFilePath,
 			this.settings.maxLogFileSize,
+			this.settings.enableLogging,
 		);
 
 		this.startTime = "";
+		
+		// デフォルトのAPI呼び出し関数
+		this.apiCallFn = callGeminiApi;
 	}
 
 	/**
@@ -104,7 +111,7 @@ export class AutoTagger {
 		// セッション開始をログに記録
 		await this.logger.logSessionStart(
 			this.settings.targetDirectory,
-			this.settings.excludeNoteTag,
+			this.settings.excludeNoteTags,
 			this.settings.excludeSuggestionTags,
 		);
 
@@ -262,10 +269,10 @@ export class AutoTagger {
 			// Gemini APIを呼び出し (Requirement 2.5)
 			let responseText: string;
 			try {
-				responseText = await callGeminiApi(prompt, {
+				responseText = await this.apiCallFn(prompt, {
+					...this.settings,
 					common: this.geminiSettings,
-					autoTagger: this.settings,
-				});
+				} as any);
 			} catch (error) {
 				// API呼び出しエラー (Requirement 2.5, 4.6)
 				const errorMsg =

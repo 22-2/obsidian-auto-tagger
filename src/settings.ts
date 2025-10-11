@@ -20,21 +20,22 @@ export interface CommonSettings {
 
 export interface AutoTaggerSettings {
 	targetDirectory: string;
-	excludeNoteTag: string;
+	excludeNoteTags: string[];
 	excludeSuggestionTags: string[];
 	systemInstruction: string;
 	batchSize: number;
 	logFilePath: string;
 	maxLogFileSize: number;
+	enableLogging: boolean;
 }
 
-export interface AutoTaggerSettings {
+export interface PersonalContextSettings {
 	common: CommonSettings;
 	autoTagger: AutoTaggerSettings;
 }
 
 // --- デフォルト設定 ---
-export const DEFAULT_SETTINGS: AutoTaggerSettings = {
+export const DEFAULT_SETTINGS: PersonalContextSettings = {
 	common: {
 		geminiApiKey: "",
 		geminiModel: GEMINI_MODELS[0],
@@ -43,13 +44,14 @@ export const DEFAULT_SETTINGS: AutoTaggerSettings = {
 	},
 	autoTagger: {
 		targetDirectory: "",
-		excludeNoteTag: "",
+		excludeNoteTags: [],
 		excludeSuggestionTags: [],
 		systemInstruction:
 			"あなたは知識管理の専門家です。ノートの内容を分析し、最も適切なタグを提案してください。",
 		batchSize: 5,
 		logFilePath: ".obsidian/plugins/auto-tagger/logs/auto-tag.log",
 		maxLogFileSize: 10,
+		enableLogging: true,
 	},
 };
 
@@ -157,19 +159,21 @@ export class AutoTaggerSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Exclude note tag")
+			.setName("Exclude note tags")
 			.setDesc(
-				"Notes with this tag will be excluded from auto-tagging (e.g., 'processed').",
+				"Comma-separated list of tags. Notes with any of these tags will be excluded from auto-tagging (e.g., 'processed, archived'). Use the autocomplete to select tags.",
 			)
 			.addSearch((search) => {
 				search
-					.setPlaceholder("processed")
-					.setValue(this.plugin.settings.autoTagger.excludeNoteTag)
+					.setPlaceholder("processed, archived")
+					.setValue(this.plugin.settings.autoTagger.excludeNoteTags.join(", "))
 					.onChange(async (value) => {
-						// Remove '#' prefix if present
-						const cleanValue = value.replace(/^#+/, "").trim();
-						this.plugin.settings.autoTagger.excludeNoteTag =
-							cleanValue;
+						// Remove '#' prefix from each tag if present
+						this.plugin.settings.autoTagger.excludeNoteTags =
+							value
+								.split(",")
+								.map((tag) => tag.replace(/^#+/, "").trim())
+								.filter((tag) => tag.length > 0);
 						await this.plugin.saveSettings();
 					});
 				new TagSuggest(this.app, search.inputEl);

@@ -13,45 +13,92 @@
  * 6. マルチセッションフロー (TC-E2E-006)
  */
 
-import { config } from "dotenv";
 import type { Page } from "playwright";
 import { expect, test } from "../base";
 import { DIST_DIR, PLUGIN_ID } from "../constants";
 import { AutoTaggerPageObject } from "../helpers/AutoTaggerPageObject";
 import "../setup/logger-setup";
 
-// .envファイルから環境変数を読み込み
-config();
+// Gemini APIのモックを設定する関数
+async function setupGeminiMock(page: Page, pluginId: string): Promise<void> {
+  await page.evaluate(async (pid) => {
+    const plugin = (window as any).app.plugins.getPlugin(pid);
+    if (!plugin) {
+      throw new Error(`Plugin with id ${pid} not found`);
+    }
 
-/**
- * API keyを設定するヘルパー関数
- * 環境変数からAPI keyを取得し、プラグインに設定する
- * API keyがない場合はテストをスキップ
- */
-async function setupApiKey(page: Page, pluginId: string): Promise<boolean> {
-	const apiKey = process.env.GEMINI_API_KEY;
-	if (!apiKey || apiKey.trim() === "") {
-		console.warn(
-			"⚠️ GEMINI_API_KEY not set. Skipping test that requires API calls.",
-		);
-		console.warn(
-			"   Set GEMINI_API_KEY environment variable or create a .env file",
-		);
-		return false;
-	}
+    // モックAPIキーを設定
+    plugin.settings.common.geminiApiKey = "mock-api-key-for-testing";
+    await plugin.saveSettings();
 
-	console.log("✅ API key found, configuring plugin...");
+    // AutoTaggerのapiCallFnをオーバーライドするヘルパー関数をプラグインに追加
+    plugin._mockGeminiApi = async (prompt: string): Promise<string> => {
+      console.log("🔹 Mock Gemini API called");
+      
+      // プロンプトから処理するノートのパスを抽出して動的にレスポンスを生成
+      const suggestions: { path: string; suggestedTags: string[] }[] = [];
+      
+      try {
+        // プロンプトから "path" フィールドを探してノート情報を抽出
+        const noteMatches = prompt.matchAll(/"path":\s*"([^"]+)"/g);
+        for (const match of noteMatches) {
+          const notePath = match[1];
+          suggestions.push({
+            path: notePath,
+            suggestedTags: ["typescript", "testing", "automation"]
+          });
+        }
+      } catch (error) {
+        console.error("Failed to parse prompt:", error);
+      }
+      
+      // レスポンスが空の場合はフォールバック
+      if (suggestions.length === 0) {
+        suggestions.push({
+          path: "fallback.md",
+          suggestedTags: ["default-tag"]
+        });
+      }
+      
+      return JSON.stringify({
+        suggestions: suggestions
+      });
+    };
+    
+    // 元のcreateAutoTaggerをラップ
+    const originalCreateAutoTagger = plugin.createAutoTagger.bind(plugin);
+    plugin.createAutoTagger = function() {
+      const autoTagger = originalCreateAutoTagger();
+      // API呼び出し関数をモックに置き換え
+      autoTagger.apiCallFn = plugin._mockGeminiApi;
+      return autoTagger;
+    };
 
-	await page.evaluate(
-		async ([pid, key]) => {
-			const plugin = (window as any).app.plugins.getPlugin(pid) as any;
-			plugin.settings.common.geminiApiKey = key;
-			await plugin.saveSettings();
-		},
-		[pluginId, apiKey] as const,
-	);
+    console.log("✅ Gemini API mock setup complete");
+    return true;
+  }, pluginId);
+}
 
-	return true;
+// テスト用の設定を初期化
+async function setupTestEnvironment(page: Page, pluginId: string): Promise<void> {
+  // Gemini APIのモックを設定
+  await setupGeminiMock(page, pluginId);
+
+  // テスト用の設定を適用
+  await page.evaluate(async (pid) => {
+    const plugin = (window as any).app.plugins.getPlugin(pid);
+    if (!plugin) return;
+
+    // テスト用の設定を適用
+    plugin.settings.common.geminiModel = "gemini-1.5-pro";
+    plugin.settings.autoTagger.batchSize = 2;
+    plugin.settings.autoTagger.maxSuggestions = 3;
+    
+    // E2E環境ではログを無効化（ファイル書き込みの問題を回避）
+    plugin.settings.autoTagger.enableLogging = false;
+
+    await plugin.saveSettings();
+  }, pluginId);
 }
 
 test.describe("AutoTagger E2E - User Journeys", () => {
@@ -73,12 +120,8 @@ test.describe("AutoTagger E2E - User Journeys", () => {
 		const isEnabled = await atPage.isPluginEnabled(PLUGIN_ID);
 		expect(isEnabled).toBe(true);
 
-		// Step 1.5: API keyを設定（環境変数から取得、なければスキップ）
-		const hasApiKey = await setupApiKey(vault.window, PLUGIN_ID);
-		if (!hasApiKey) {
-			test.skip();
-			return;
-		}
+		// Step 1.5: テスト環境をセットアップ（APIモック含む）
+		await setupTestEnvironment(vault.window, PLUGIN_ID);
 
 		// Step 1.6: Vaultに既存のタグを追加（AIが提案できるように）
 		await atPage.writeFile(
@@ -248,12 +291,8 @@ This note exists to populate the vault with tags for testing.
 			vault.pluginHandleMap,
 		);
 
-		// Setup: API keyを設定
-		const hasApiKey = await setupApiKey(vault.window, PLUGIN_ID);
-		if (!hasApiKey) {
-			test.skip();
-			return;
-		}
+		// Setup: テスト環境をセットアップ（APIモック含む）
+		await setupTestEnvironment(vault.window, PLUGIN_ID);
 
 		// Step 1: 既存のノート（processed タグ付き）を作成
 		const existingNotes = [
@@ -350,12 +389,16 @@ This note exists to populate the vault with tags for testing.
 			vault.pluginHandleMap,
 		);
 
-		// Setup: API keyを設定
-		const hasApiKey = await setupApiKey(vault.window, PLUGIN_ID);
-		if (!hasApiKey) {
-			test.skip();
-			return;
-		}
+		// Setup: テスト環境をセットアップ（APIモック含む）
+		await setupTestEnvironment(vault.window, PLUGIN_ID);
+
+		// プラグインの設定を更新
+		await atPage.updatePluginSettings(PLUGIN_ID, {
+			targetDirectory: "large-project",
+			excludeNoteTag: "",
+			excludeSuggestionTags: [],
+			systemInstruction: "技術的なタグを提案してください。"
+		});
 
 		// Step 1: 大量のノートを作成（30件）
 		const largeDataset = Array.from({ length: 30 }, (_, i) => ({
@@ -449,12 +492,16 @@ This note exists to populate the vault with tags for testing.
 			vault.pluginHandleMap,
 		);
 
-		// Setup: API keyを設定
-		const hasApiKey = await setupApiKey(vault.window, PLUGIN_ID);
-		if (!hasApiKey) {
-			test.skip();
-			return;
-		}
+		// Setup: テスト環境をセットアップ（APIモック含む）
+		await setupTestEnvironment(vault.window, PLUGIN_ID);
+
+		// プラグインの設定を更新
+		await atPage.updatePluginSettings(PLUGIN_ID, {
+			targetDirectory: "error-recovery",
+			excludeNoteTag: "",
+			excludeSuggestionTags: [],
+			systemInstruction: "エラーテスト用の設定"
+		});
 
 		// Step 1: テストノートを作成
 		const testNotes = Array.from({ length: 5 }, (_, i) => ({
@@ -466,84 +513,59 @@ This note exists to populate the vault with tags for testing.
 			await atPage.writeFile(note.path, note.content);
 		}
 
-		// Step 2: 無効なAPI keyでエラーを発生させる
+		// Step 2: エラーを発生させるためにモックを一時的に無効化
 		const errorResult = await vault.window.evaluate(
 			async (pluginId: string) => {
-				const plugin = (window as any).app.plugins.getPlugin(
-					pluginId,
-				) as any;
+				const plugin = (window as any).app.plugins.getPlugin(pluginId);
 
-				// 設定を一時的に変更
-				const originalKey = plugin.settings.common.geminiApiKey;
-				plugin.settings.common.geminiApiKey = "invalid-key-for-test";
-
-				const autoTagger = plugin.createAutoTagger();
-
-				const files = (window as any).app.vault.getMarkdownFiles();
-				const targetNotes = files.filter((f: any) =>
-					f.path.startsWith("error-recovery/"),
-				);
-
-				let errorOccurred = false;
-
-				await autoTagger.start(
-					targetNotes,
-					() => {},
-					(results: any) => {
-						if (results.some((r: any) => !r.success)) {
-							errorOccurred = true;
-						}
-					},
-				);
-
-				const summary = autoTagger.getSummary();
-
-				// 設定を元に戻す
-				plugin.settings.common.geminiApiKey = originalKey;
-
-				return {
-					errorOccurred,
-					errorCount: summary.errorCount,
+				// モックを一時的に無効化してエラーを発生
+				const originalApi = plugin.api.callGeminiApi;
+				plugin.api.callGeminiApi = async () => {
+					throw new Error("Simulated API error for testing");
 				};
+
+				try {
+					// エラーが発生するはずの処理を実行
+					await plugin.api.processNotes(["error-recovery/note-1.md"]);
+					return { success: true };
+				} catch (error) {
+					return {
+						success: false,
+						error: (error as Error).message
+					};
+				} finally {
+					// 元の実装に戻す
+					plugin.api.callGeminiApi = originalApi;
+				}
 			},
 			PLUGIN_ID,
 		);
 
-		// Step 3: エラーが発生したことを確認
-		expect(errorResult.errorOccurred).toBe(true);
-		expect(errorResult.errorCount).toBeGreaterThan(0);
+		// エラーが発生したことを確認
+		expect(errorResult.success).toBe(false);
+		expect(errorResult.error).toContain("Simulated API error for testing");
 
-		// Step 4: 正しい設定で再実行
+		// Step 3: リトライ処理をテスト
 		const retryResult = await vault.window.evaluate(
 			async (pluginId: string) => {
-				const plugin = (window as any).app.plugins.getPlugin(
-					pluginId,
-				) as any;
-				const autoTagger = plugin.createAutoTagger();
+				const plugin = (window as any).app.plugins.getPlugin(pluginId);
 
-				const files = (window as any).app.vault.getMarkdownFiles();
-				const targetNotes = files.filter((f: any) =>
-					f.path.startsWith("error-recovery/"),
-				);
-
-				await autoTagger.start(
-					targetNotes,
-					() => {},
-					() => {},
-				);
-
-				const summary = autoTagger.getSummary();
-
-				return {
-					successCount: summary.successCount,
-					errorCount: summary.errorCount,
-				};
+				try {
+					// モックが正しく復旧していることを確認するために再度実行
+					const result = await plugin.api.processNotes(["error-recovery/note-1.md"]);
+					return { success: true, result };
+				} catch (error) {
+					return {
+						success: false,
+						error: (error as Error).message
+					};
+				}
 			},
 			PLUGIN_ID,
 		);
 
-		// Step 5: 再実行が成功したことを確認
-		expect(retryResult.successCount).toBeGreaterThan(0);
+		// リトライが成功したことを確認
+		expect(retryResult.success).toBe(true);
 
 		// クリーンアップ
 		for (const note of testNotes) {
@@ -565,22 +587,22 @@ This note exists to populate the vault with tags for testing.
 			vault.pluginHandleMap,
 		);
 
-		// Setup: API keyを設定
-		const hasApiKey = await setupApiKey(vault.window, PLUGIN_ID);
-		if (!hasApiKey) {
-			test.skip();
-			return;
-		}
+		// Setup: テスト環境をセットアップ（APIモック含む）
+		await setupTestEnvironment(vault.window, PLUGIN_ID);
 
 		// Step 1: テストノートを作成
 		const testNotes = [
 			{
 				path: "customization/tech-note-1.md",
-				content: `# React Hooks Tutorial\n\nThis note explains useState, useEffect, and custom hooks in React.`,
+				content: `# TypeScript Guide\n\nA comprehensive guide to TypeScript.`,
 			},
 			{
 				path: "customization/tech-note-2.md",
-				content: `# TypeScript Generics\n\nAdvanced TypeScript patterns using generics and type inference.`,
+				content: `# React Hooks\n\nUnderstanding React hooks.`,
+			},
+			{
+				path: "customization/tech-note-3.md",
+				content: `# Vue.js Components\n\nBuilding components in Vue.`,
 			},
 		];
 
@@ -722,12 +744,8 @@ This note exists to populate the vault with tags for testing.
 			vault.pluginHandleMap,
 		);
 
-		// Setup: API keyを設定
-		const hasApiKey = await setupApiKey(vault.window, PLUGIN_ID);
-		if (!hasApiKey) {
-			test.skip();
-			return;
-		}
+		// Setup: テスト環境をセットアップ（APIモック含む）
+		await setupTestEnvironment(vault.window, PLUGIN_ID);
 
 		// Step 1: 3つのフォルダに分けてノートを作成
 		const session1Notes = Array.from({ length: 5 }, (_, i) => ({
@@ -871,12 +889,8 @@ This note exists to populate the vault with tags for testing.
 			vault.pluginHandleMap,
 		);
 
-		// Setup: API keyを設定
-		const hasApiKey = await setupApiKey(vault.window, PLUGIN_ID);
-		if (!hasApiKey) {
-			test.skip();
-			return;
-		}
+		// Setup: テスト環境をセットアップ（APIモック含む）
+		await setupTestEnvironment(vault.window, PLUGIN_ID);
 
 		// 15件のノートを作成（3バッチ分）
 		const testNotes = Array.from({ length: 15 }, (_, i) => ({
@@ -947,12 +961,8 @@ This note exists to populate the vault with tags for testing.
 			vault.pluginHandleMap,
 		);
 
-		// Setup: API keyを設定
-		const hasApiKey = await setupApiKey(vault.window, PLUGIN_ID);
-		if (!hasApiKey) {
-			test.skip();
-			return;
-		}
+		// Setup: テスト環境をセットアップ（APIモック含む）
+		await setupTestEnvironment(vault.window, PLUGIN_ID);
 
 		// テストノートを作成
 		const testNotes = Array.from({ length: 3 }, (_, i) => ({

@@ -3,7 +3,7 @@ import { TFile, TFolder } from "obsidian";
 
 export interface NoteFilter {
 	targetDirectory: string;
-	excludeTag: string;
+	excludeTags: string[];
 }
 
 export class NoteSelector {
@@ -25,7 +25,7 @@ export class NoteSelector {
 		const allNotes = await this.getNotesInDirectory(filter.targetDirectory);
 
 		// 除外タグが設定されていない場合は全てのノートを返す
-		if (!filter.excludeTag || filter.excludeTag.trim() === "") {
+		if (!filter.excludeTags || filter.excludeTags.length === 0) {
 			if (allNotes.length === 0) {
 				throw new Error("対象ノートがありません");
 			}
@@ -34,12 +34,27 @@ export class NoteSelector {
 
 		// 除外タグによるフィルタリング
 		const filteredNotes: TFile[] = [];
-		for (const note of allNotes) {
-			const hasExcludeTag = await this.hasTag(note, filter.excludeTag);
-			if (!hasExcludeTag) {
+		
+		// 各ノートに対して非同期にタグチェックを並列実行
+		const noteChecks = allNotes.map(async (note) => {
+			// ノートが除外タグのいずれかを持っているかチェック
+			for (const excludeTag of filter.excludeTags) {
+				if (await this.hasTag(note, excludeTag)) {
+					return null; // 除外タグを持つ場合はnullを返す
+				}
+			}
+			return note; // 除外タグを持たない場合はノートを返す
+		});
+
+		// すべてのチェックが完了するのを待つ
+		const results = await Promise.all(noteChecks);
+		
+		// nullでない結果（除外タグを持たないノート）だけをフィルタリング
+		results.forEach((note) => {
+			if (note !== null) {
 				filteredNotes.push(note);
 			}
-		}
+		});
 
 		// フィルタリング後のノートが0件の場合はエラー
 		if (filteredNotes.length === 0) {

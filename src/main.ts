@@ -3,14 +3,14 @@ import { AutoTagger } from "./services/autoTagger";
 import {
 	AutoTaggerSettingTab,
 	DEFAULT_SETTINGS,
-	type AutoTaggerSettings,
+	type PersonalContextSettings,
 } from "./settings";
 import { toggleLoggerBy } from "./utils/logger";
 import { AUTO_TAG_VIEW_TYPE, AutoTagView } from "./view/autoTagView";
 import { SvelteView, VIEW_TYPE } from "./view/view";
 
 export default class MyPlugin extends Plugin {
-	settings: AutoTaggerSettings = DEFAULT_SETTINGS;
+	settings: PersonalContextSettings = DEFAULT_SETTINGS;
 
 	async onload() {
 		await this.loadSettings();
