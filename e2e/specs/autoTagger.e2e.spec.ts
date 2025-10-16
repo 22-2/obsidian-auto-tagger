@@ -979,16 +979,11 @@ This note exists to populate the vault with tags for testing.
 				f.path.startsWith("log-test/"),
 			);
 
-			console.log(`[TEST] Found ${targetNotes.length} notes to process`);
-			console.log(`[TEST] Logger enabled: ${autoTagger.logger.enabled}`);
-
 			await autoTagger.start(
 				targetNotes,
 				() => {},
 				() => {},
 			);
-			
-			console.log(`[TEST] AutoTagger finished`);
 		}, PLUGIN_ID);
 
 		// Obsidianがファイルシステム変更を認識するまで少し待つ
@@ -996,28 +991,6 @@ This note exists to populate the vault with tags for testing.
 
 		// ログファイルの存在を確認
 		const logPath = ".obsidian/plugins/auto-tagger/logs/auto-tag.log";
-		
-		// デバッグ: ファイルシステムの状態を確認
-		const debugInfo = await vault.window.evaluate(async (path: string) => {
-			const adapter = (window as any).app.vault.adapter;
-			const basePath = (adapter as any).basePath;
-			const exists = await adapter.exists(path);
-			
-			// logsディレクトリの存在も確認
-			const logsDir = ".obsidian/plugins/auto-tagger/logs";
-			const logsDirExists = await adapter.exists(logsDir);
-			
-			return {
-				basePath,
-				logPath: path,
-				exists,
-				logsDir,
-				logsDirExists
-			};
-		}, logPath);
-		
-		console.log("[TEST] Debug info:", debugInfo);
-		
 		const logExists = await atPage.fileExists(logPath);
 		expect(logExists).toBe(true);
 
