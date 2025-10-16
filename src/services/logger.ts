@@ -1,4 +1,6 @@
-import { type App, Notice, TFile } from "obsidian";
+import { createWriteStream } from "fs";
+import { type App, TFile } from "obsidian";
+import * as path from "path";
 
 export interface LogEntry {
 	timestamp: string;
@@ -34,7 +36,7 @@ export class LoggerService {
 		if (!this.enabled) {
 			return;
 		}
-		
+
 		try {
 			// ログファイルのサイズをチェックし、必要に応じてローテーション
 			await this.checkAndRotateIfNeeded();
@@ -62,7 +64,7 @@ export class LoggerService {
 		if (!this.enabled) {
 			return;
 		}
-		
+
 		try {
 			const duration = this.calculateDuration(
 				summary.startTime,
@@ -102,7 +104,7 @@ End Time: ${summary.endTime}
 		if (!this.enabled) {
 			return;
 		}
-		
+
 		try {
 			const startMessage = `
 === Auto-Tagging Session Started ===
@@ -139,82 +141,33 @@ Exclude Suggestion Tags: ${excludeSuggestionTags.length > 0 ? excludeSuggestionT
 	}
 
 	/**
-	 * ログファイルに追記
+	 * ログファイルに追記（Node.js fsストリームベース）
 	 * @param content - 追記する内容
 	 * @throws ファイル操作に失敗した場合
 	 */
 	private async appendToLogFile(content: string): Promise<void> {
-		const vault = this.app.vault;
-
 		// ディレクトリが存在することを確認
-		try {
-			await this.ensureDirectoryExists();
-		} catch (dirError) {
-			console.error("Failed to ensure directory exists:", dirError);
-			// ディレクトリ作成に失敗した場合は処理を中断
-			throw dirError;
-		}
+		await this.ensureDirectoryExists();
 
-		// リトライ処理
-		const maxRetries = 5;
-		let lastError: Error | null = null;
+		// Vaultのベースパスを取得
+		const basePath = (this.app.vault.adapter as any).basePath;
+		const fullPath = path.join(basePath, this.logFilePath);
 
-		for (let attempt = 0; attempt < maxRetries; attempt++) {
-			try {
-				// ファイルの存在を確認
-				const file = vault.getAbstractFileByPath(this.logFilePath);
+		// Node.jsのストリームを使用してファイルに追記
+		return new Promise((resolve, reject) => {
+			const stream = createWriteStream(fullPath, { flags: 'a' });
 
-				if (file instanceof TFile) {
-					// 既存ファイルに追記
-					const existingContent = await vault.read(file);
-					await vault.modify(file, existingContent + content);
-					return; // 成功したら終了
-				} else if (file === null) {
-					// 新規ファイルを作成
-					try {
-						await vault.create(this.logFilePath, content);
-						// 作成成功 - ファイルには既にcontentが書き込まれている
-						return;
-					} catch (createError) {
-						const errorMsg = createError instanceof Error ? createError.message : String(createError);
-						
-						// 別のプロセスが既にファイルを作成した場合
-						if (errorMsg.includes("File already exists") || errorMsg.includes("already exists")) {
-							// 少し待ってから再度ファイルを取得して追記を試みる
-							await new Promise(resolve => setTimeout(resolve, 150));
-							
-							// ファイルが利用可能になるまで少し待つ
-							const retryFile = vault.getAbstractFileByPath(this.logFilePath);
-							if (retryFile instanceof TFile) {
-								const existingContent = await vault.read(retryFile);
-								await vault.modify(retryFile, existingContent + content);
-								return;
-							}
-							// まだファイルが取得できない場合は次のループへ
-							lastError = new Error("File exists but cannot be retrieved");
-						} else {
-							// その他のエラー
-							lastError = createError instanceof Error ? createError : new Error(String(createError));
-						}
-					}
-				} else {
-					// ファイルではなくフォルダが存在する場合
-					throw new Error(`Log path is a directory, not a file: ${this.logFilePath}`);
-				}
-			} catch (error) {
-				lastError = error instanceof Error ? error : new Error(String(error));
-				console.error(`Retry ${attempt + 1}/${maxRetries} - Error:`, lastError.message);
-			}
-			
-			// 次のリトライ前に待機
-			if (attempt < maxRetries - 1) {
-				await new Promise(resolve => setTimeout(resolve, 150 * (attempt + 1)));
-			}
-		}
+			stream.on('error', (error) => {
+				reject(error);
+			});
 
-		// リトライ回数を超えた場合はエラーをスロー
-		const errorDetails = lastError ? lastError.message : '不明なエラー';
-		throw new Error(`ログファイルの書き込みに失敗しました (${maxRetries}回リトライ): ${errorDetails}`);
+			stream.on('finish', () => {
+				resolve();
+			});
+
+			stream.write(content);
+			stream.end();
+		});
 	}
 
 	/**
