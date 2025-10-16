@@ -45,7 +45,7 @@ export class AutoTagger {
 	private state: AutoTaggerState;
 	private logger: LoggerService;
 	private startTime: string;
-	
+
 	// テスト用: API呼び出し関数をオーバーライド可能にする
 	public apiCallFn: (prompt: string, settings: AutoTaggerSettings) => Promise<string>;
 
@@ -74,7 +74,7 @@ export class AutoTagger {
 		);
 
 		this.startTime = "";
-		
+
 		// デフォルトのAPI呼び出し関数
 		this.apiCallFn = callGeminiApi;
 	}
@@ -190,9 +190,10 @@ export class AutoTagger {
 						error: result.error,
 					});
 				}
-
-				this.state.processedNotes++;
 			}
+
+			// バッチ内のノート数分だけprocessedNotesを増やす
+			this.state.processedNotes += batch.length;
 
 			// バッチ完了を通知
 			onBatchComplete(results);
@@ -203,6 +204,11 @@ export class AutoTagger {
 
 		// 処理完了
 		this.state.isRunning = false;
+		
+		// サマリーをログに記録
+		const summary = this.getSummary();
+		await this.logger.logSummary(summary);
+		
 		onProgress(this.state);
 	}
 

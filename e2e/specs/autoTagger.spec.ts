@@ -12,6 +12,59 @@ import "../setup/logger-setup";
  */
 
 test.describe("AutoTagger Service", () => {
+	// 各テストの前にGemini APIをモック
+	test.beforeEach(async ({ vault }) => {
+		await vault.window.evaluate((pluginId: string) => {
+			const plugin = (window as any).app.plugins.getPlugin(pluginId) as any;
+
+			// AutoTaggerサービスのapiCallFnをオーバーライド
+			const originalCreateAutoTagger = plugin.createAutoTagger.bind(plugin);
+			plugin.createAutoTagger = function() {
+				const autoTagger = originalCreateAutoTagger();
+
+				// モックAPI関数を設定
+				autoTagger.apiCallFn = async (prompt: string) => {
+					// プロンプトからノート情報を抽出
+					const notesMatch = prompt.match(/"path"\s*:\s*"([^"]+)"/g);
+					if (!notesMatch) {
+						return JSON.stringify({ suggestions: [] });
+					}
+
+					// 各ノートに対してモックタグを生成
+					const suggestions = notesMatch.map((match: string) => {
+						const pathMatch = match.match(/"path"\s*:\s*"([^"]+)"/);
+						if (!pathMatch) return null;
+
+						const path = pathMatch[1];
+						const filename = path.toLowerCase();
+
+						// ファイル名に基づいてモックタグを返す
+						let suggestedTags: string[] = [];
+						if (filename.includes('ai') || filename.includes('machine')) {
+							suggestedTags = ['ai', 'machine-learning', 'technology'];
+						} else if (filename.includes('project') || filename.includes('management')) {
+							suggestedTags = ['project-management', 'productivity'];
+						} else if (filename.includes('note-1')) {
+							suggestedTags = ['ai', 'machine-learning'];
+						} else if (filename.includes('note-2')) {
+							suggestedTags = ['project-management', 'productivity'];
+						} else if (filename.includes('note-3')) {
+							suggestedTags = ['productivity', 'tools'];
+						} else {
+							suggestedTags = ['general'];
+						}
+
+						return { path, suggestedTags };
+					}).filter((s: any) => s !== null);
+
+					return JSON.stringify({ suggestions });
+				};
+
+				return autoTagger;
+			};
+		}, PLUGIN_ID);
+	});
+
 	test("should process notes in batches and apply tags", async ({
 		vault,
 	}) => {
@@ -178,24 +231,25 @@ test.describe("AutoTagger Service", () => {
 	});
 
 	test("should handle errors gracefully", async ({ vault }) => {
-		// 無効なAPIキーでテスト
+		// エラーをシミュレートするテスト
 		const result = await vault.window.evaluate(async (pluginId: string) => {
 			const plugin = app.plugins.getPlugin(pluginId) as any;
 
-			// 無効な設定でAutoTaggerを作成
-			const invalidSettings = {
-				...plugin.settings.common,
-				geminiApiKey: "invalid-api-key",
+			// エラーを投げるモックでcreateAutoTaggerを上書き
+			const originalCreateAutoTagger = plugin.createAutoTagger.bind(plugin);
+			plugin.createAutoTagger = function() {
+				const autoTagger = originalCreateAutoTagger();
+
+				// エラーを投げるモックAPI関数を設定
+				autoTagger.apiCallFn = async () => {
+					throw new Error('API request failed with status 400. Full response: {"error": {"code": 400, "message": "API key not valid. Please pass a valid API key.", "status": "INVALID_ARGUMENT"}}');
+				};
+
+				return autoTagger;
 			};
 
-			// 一時的に設定を変更
-			const originalSettings = plugin.settings.common;
-			plugin.settings.common = invalidSettings;
-
+			// エラーモックを使ってAutoTaggerを作成
 			const autoTagger = plugin.createAutoTagger();
-
-			// 設定を元に戻す
-			plugin.settings.common = originalSettings;
 
 			// テストノートを作成
 			await app.vault.create(

@@ -9,7 +9,7 @@ import type { VaultPageTextContext } from "./types";
  */
 export class AutoTaggerPageObject extends ObsidianPageObject {
 	constructor(
-		page: Page,
+		public page: Page,
 		pluginHandleMap?: VaultPageTextContext["pluginHandleMap"],
 	) {
 		super(page, pluginHandleMap, { viewType: "auto-tag-view" });
@@ -330,6 +330,7 @@ export class AutoTaggerPageObject extends ObsidianPageObject {
 			excludeNoteTag?: string;
 			excludeSuggestionTags?: string[];
 			systemInstruction?: string;
+			batchSize?: number;
 		},
 	): Promise<void> {
 		await this.page.evaluate(
@@ -354,10 +355,81 @@ export class AutoTaggerPageObject extends ObsidianPageObject {
 					plugin.settings.autoTagger.systemInstruction =
 						newSettings.systemInstruction;
 				}
+				if (newSettings.batchSize !== undefined) {
+					plugin.settings.autoTagger.batchSize =
+						newSettings.batchSize;
+				}
 
 				await plugin.saveSettings();
 			},
 			[pluginId, settings] as const,
 		);
+	}
+
+	/**
+	 * Gemini APIをモックする（テスト用）
+	 * AutoTaggerサービスのapiCallFnをオーバーライドして、モックレスポンスを返すようにします
+	 */
+	async mockGeminiApi(pluginId: string): Promise<void> {
+		await this.page.evaluate((pid) => {
+			const plugin = (window as any).app.plugins.getPlugin(pid) as any;
+
+			// AutoTaggerサービスのapiCallFnをオーバーライド
+			const originalCreateAutoTagger = plugin.createAutoTagger.bind(plugin);
+			plugin.createAutoTagger = function() {
+				const autoTagger = originalCreateAutoTagger();
+
+				// モックAPI関数を設定
+				autoTagger.apiCallFn = async (prompt: string) => {
+					// プロンプトから "Notes to Process" セクションのみを抽出
+					const notesToProcessMatch = prompt.match(/## Notes to Process\s*([\s\S]*?)\s*## Example Output/);
+					if (!notesToProcessMatch) {
+						console.log('Mock API: Could not find Notes to Process section');
+						return JSON.stringify({ suggestions: [] });
+					}
+
+					// このセクション内からノート情報を抽出
+					const notesSection = notesToProcessMatch[1];
+					const notesMatch = notesSection.match(/"path"\s*:\s*"([^"]+)"/g);
+					console.log('Mock API: Found', notesMatch?.length || 0, 'notes in prompt');
+					
+					if (!notesMatch) {
+						return JSON.stringify({ suggestions: [] });
+					}
+
+					// 各ノートに対してモックタグを生成
+					const suggestions = notesMatch.map((match: string) => {
+						const pathMatch = match.match(/"path"\s*:\s*"([^"]+)"/);
+						if (!pathMatch) return null;
+
+						const path = pathMatch[1];
+						const filename = path.toLowerCase();
+
+						// ファイル名に基づいてモックタグを返す
+						let suggestedTags: string[] = [];
+						if (filename.includes('ai') || filename.includes('machine')) {
+							suggestedTags = ['ai', 'machine-learning', 'technology'];
+						} else if (filename.includes('project') || filename.includes('management')) {
+							suggestedTags = ['project-management', 'productivity'];
+						} else if (filename.includes('note-1')) {
+							suggestedTags = ['ai', 'machine-learning'];
+						} else if (filename.includes('note-2')) {
+							suggestedTags = ['project-management', 'productivity'];
+						} else if (filename.includes('note-3')) {
+							suggestedTags = ['productivity', 'tools'];
+						} else {
+							suggestedTags = ['general'];
+						}
+
+						return { path, suggestedTags };
+					}).filter((s: any) => s !== null);
+
+					console.log('Mock API: Returning', suggestions.length, 'suggestions');
+					return JSON.stringify({ suggestions });
+				};
+
+				return autoTagger;
+			};
+		}, pluginId);
 	}
 }

@@ -13,92 +13,39 @@
  * 6. マルチセッションフロー (TC-E2E-006)
  */
 
-import type { Page } from "playwright";
 import { expect, test } from "../base";
 import { DIST_DIR, PLUGIN_ID } from "../constants";
 import { AutoTaggerPageObject } from "../helpers/AutoTaggerPageObject";
 import "../setup/logger-setup";
 
-// Gemini APIのモックを設定する関数
-async function setupGeminiMock(page: Page, pluginId: string): Promise<void> {
-  await page.evaluate(async (pid) => {
-    const plugin = (window as any).app.plugins.getPlugin(pid);
-    if (!plugin) {
-      throw new Error(`Plugin with id ${pid} not found`);
-    }
-
-    // モックAPIキーを設定
-    plugin.settings.common.geminiApiKey = "mock-api-key-for-testing";
-    await plugin.saveSettings();
-
-    // AutoTaggerのapiCallFnをオーバーライドするヘルパー関数をプラグインに追加
-    plugin._mockGeminiApi = async (prompt: string): Promise<string> => {
-      console.log("🔹 Mock Gemini API called");
-      
-      // プロンプトから処理するノートのパスを抽出して動的にレスポンスを生成
-      const suggestions: { path: string; suggestedTags: string[] }[] = [];
-      
-      try {
-        // プロンプトから "path" フィールドを探してノート情報を抽出
-        const noteMatches = prompt.matchAll(/"path":\s*"([^"]+)"/g);
-        for (const match of noteMatches) {
-          const notePath = match[1];
-          suggestions.push({
-            path: notePath,
-            suggestedTags: ["typescript", "testing", "automation"]
-          });
-        }
-      } catch (error) {
-        console.error("Failed to parse prompt:", error);
-      }
-      
-      // レスポンスが空の場合はフォールバック
-      if (suggestions.length === 0) {
-        suggestions.push({
-          path: "fallback.md",
-          suggestedTags: ["default-tag"]
-        });
-      }
-      
-      return JSON.stringify({
-        suggestions: suggestions
-      });
-    };
-    
-    // 元のcreateAutoTaggerをラップ
-    const originalCreateAutoTagger = plugin.createAutoTagger.bind(plugin);
-    plugin.createAutoTagger = function() {
-      const autoTagger = originalCreateAutoTagger();
-      // API呼び出し関数をモックに置き換え
-      autoTagger.apiCallFn = plugin._mockGeminiApi;
-      return autoTagger;
-    };
-
-    console.log("✅ Gemini API mock setup complete");
-    return true;
-  }, pluginId);
-}
-
 // テスト用の設定を初期化
-async function setupTestEnvironment(page: Page, pluginId: string): Promise<void> {
+async function setupTestEnvironment(
+  atPage: AutoTaggerPageObject,
+  pluginId: string,
+  options?: {
+    batchSize?: number;
+    enableLogging?: boolean;
+  }
+): Promise<void> {
   // Gemini APIのモックを設定
-  await setupGeminiMock(page, pluginId);
+  await atPage.mockGeminiApi(pluginId);
 
   // テスト用の設定を適用
-  await page.evaluate(async (pid) => {
+  await atPage.page.evaluate(async ([pid, opts]) => {
     const plugin = (window as any).app.plugins.getPlugin(pid);
     if (!plugin) return;
 
     // テスト用の設定を適用
     plugin.settings.common.geminiModel = "gemini-1.5-pro";
-    plugin.settings.autoTagger.batchSize = 2;
+    plugin.settings.autoTagger.batchSize = opts?.batchSize ?? 2;
     plugin.settings.autoTagger.maxSuggestions = 3;
-    
+
     // E2E環境ではログを無効化（ファイル書き込みの問題を回避）
-    plugin.settings.autoTagger.enableLogging = false;
+    // ただし、オプションで有効化可能
+    plugin.settings.autoTagger.enableLogging = opts?.enableLogging ?? false;
 
     await plugin.saveSettings();
-  }, pluginId);
+  }, [pluginId, options] as const);
 }
 
 test.describe("AutoTagger E2E - User Journeys", () => {
@@ -121,7 +68,7 @@ test.describe("AutoTagger E2E - User Journeys", () => {
 		expect(isEnabled).toBe(true);
 
 		// Step 1.5: テスト環境をセットアップ（APIモック含む）
-		await setupTestEnvironment(vault.window, PLUGIN_ID);
+		await setupTestEnvironment(atPage, PLUGIN_ID);
 
 		// Step 1.6: Vaultに既存のタグを追加（AIが提案できるように）
 		await atPage.writeFile(
@@ -292,7 +239,7 @@ This note exists to populate the vault with tags for testing.
 		);
 
 		// Setup: テスト環境をセットアップ（APIモック含む）
-		await setupTestEnvironment(vault.window, PLUGIN_ID);
+		await setupTestEnvironment(atPage, PLUGIN_ID);
 
 		// Step 1: 既存のノート（processed タグ付き）を作成
 		const existingNotes = [
@@ -389,8 +336,8 @@ This note exists to populate the vault with tags for testing.
 			vault.pluginHandleMap,
 		);
 
-		// Setup: テスト環境をセットアップ（APIモック含む）
-		await setupTestEnvironment(vault.window, PLUGIN_ID);
+		// Setup: テスト環境をセットアップ（APIモック含む、batchSize: 5）
+		await setupTestEnvironment(atPage, PLUGIN_ID, { batchSize: 5 });
 
 		// プラグインの設定を更新
 		await atPage.updatePluginSettings(PLUGIN_ID, {
@@ -434,6 +381,10 @@ This note exists to populate the vault with tags for testing.
 				f.path.startsWith("large-project/"),
 			);
 
+			// デバッグ情報をログ
+			console.log('Total target notes:', targetNotes.length);
+			console.log('Batch size setting:', plugin.settings.autoTagger.batchSize);
+
 			let batchCount = 0;
 			const batchSizes: number[] = [];
 
@@ -442,6 +393,7 @@ This note exists to populate the vault with tags for testing.
 				() => {},
 				(results: any) => {
 					batchCount++;
+					console.log(`Batch ${batchCount}: ${results.length} results`);
 					batchSizes.push(results.length);
 				},
 			);
@@ -452,10 +404,21 @@ This note exists to populate the vault with tags for testing.
 				batchCount,
 				batchSizes,
 				summary,
+				totalTargetNotes: targetNotes.length,
+				configuredBatchSize: plugin.settings.autoTagger.batchSize,
 			};
 		}, PLUGIN_ID);
 
 		const processingTime = Date.now() - startTime;
+
+		// デバッグ情報を出力
+		console.log('Test results:', {
+			totalTargetNotes: result.totalTargetNotes,
+			configuredBatchSize: result.configuredBatchSize,
+			batchCount: result.batchCount,
+			batchSizes: result.batchSizes,
+			summaryTotalNotes: result.summary.totalNotes,
+		});
 
 		// Step 3: 検証
 		expect(result.summary.totalNotes).toBe(30);
@@ -493,7 +456,7 @@ This note exists to populate the vault with tags for testing.
 		);
 
 		// Setup: テスト環境をセットアップ（APIモック含む）
-		await setupTestEnvironment(vault.window, PLUGIN_ID);
+		await setupTestEnvironment(atPage, PLUGIN_ID);
 
 		// プラグインの設定を更新
 		await atPage.updatePluginSettings(PLUGIN_ID, {
@@ -513,59 +476,89 @@ This note exists to populate the vault with tags for testing.
 			await atPage.writeFile(note.path, note.content);
 		}
 
-		// Step 2: エラーを発生させるためにモックを一時的に無効化
+		// Step 2: エラーを発生させてエラーリカバリーをテスト
 		const errorResult = await vault.window.evaluate(
 			async (pluginId: string) => {
-				const plugin = (window as any).app.plugins.getPlugin(pluginId);
+				const plugin = (window as any).app.plugins.getPlugin(pluginId) as any;
+				const autoTagger = plugin.createAutoTagger();
 
-				// モックを一時的に無効化してエラーを発生
-				const originalApi = plugin.api.callGeminiApi;
-				plugin.api.callGeminiApi = async () => {
+				// apiCallFnを一時的にエラーを投げるようにオーバーライド
+				const originalApiCallFn = autoTagger.apiCallFn;
+				autoTagger.apiCallFn = async (...args: any[]) => {
+					// 最初のバッチでエラーを発生
 					throw new Error("Simulated API error for testing");
 				};
 
-				try {
-					// エラーが発生するはずの処理を実行
-					await plugin.api.processNotes(["error-recovery/note-1.md"]);
-					return { success: true };
-				} catch (error) {
-					return {
-						success: false,
-						error: (error as Error).message
-					};
-				} finally {
-					// 元の実装に戻す
-					plugin.api.callGeminiApi = originalApi;
-				}
+				const files = (window as any).app.vault.getMarkdownFiles();
+				const targetNotes = files.filter((f: any) =>
+					f.path.startsWith("error-recovery/"),
+				);
+
+				const results: any[] = [];
+
+				await autoTagger.start(
+					targetNotes,
+					() => {},
+					(batchResults: any) => {
+						results.push(...batchResults);
+					},
+				);
+
+				const summary = autoTagger.getSummary();
+
+				// 元のAPIに戻す
+				autoTagger.apiCallFn = originalApiCallFn;
+
+				return {
+					summary,
+					results,
+					failedResults: results.filter((r: any) => !r.success),
+					errorCount: summary.errorCount,
+				};
 			},
 			PLUGIN_ID,
 		);
 
 		// エラーが発生したことを確認
-		expect(errorResult.success).toBe(false);
-		expect(errorResult.error).toContain("Simulated API error for testing");
+		expect(errorResult.errorCount).toBeGreaterThan(0);
+		expect(errorResult.failedResults.length).toBeGreaterThan(0);
+		expect(errorResult.failedResults[0].error).toContain("Simulated API error");
 
-		// Step 3: リトライ処理をテスト
+		// Step 3: リトライ処理をテスト（正常なモックで再実行）
 		const retryResult = await vault.window.evaluate(
 			async (pluginId: string) => {
-				const plugin = (window as any).app.plugins.getPlugin(pluginId);
+				const plugin = (window as any).app.plugins.getPlugin(pluginId) as any;
+				const autoTagger = plugin.createAutoTagger();
 
-				try {
-					// モックが正しく復旧していることを確認するために再度実行
-					const result = await plugin.api.processNotes(["error-recovery/note-1.md"]);
-					return { success: true, result };
-				} catch (error) {
-					return {
-						success: false,
-						error: (error as Error).message
-					};
-				}
+				const files = (window as any).app.vault.getMarkdownFiles();
+				const targetNotes = files.filter((f: any) =>
+					f.path.startsWith("error-recovery/"),
+				);
+
+				const results: any[] = [];
+
+				await autoTagger.start(
+					targetNotes,
+					() => {},
+					(batchResults: any) => {
+						results.push(...batchResults);
+					},
+				);
+
+				const summary = autoTagger.getSummary();
+
+				return {
+					summary,
+					successCount: results.filter((r: any) => r.success).length,
+					totalCount: results.length,
+				};
 			},
 			PLUGIN_ID,
 		);
 
 		// リトライが成功したことを確認
-		expect(retryResult.success).toBe(true);
+		expect(retryResult.successCount).toBeGreaterThan(0);
+		expect(retryResult.totalCount).toBe(testNotes.length);
 
 		// クリーンアップ
 		for (const note of testNotes) {
@@ -588,7 +581,7 @@ This note exists to populate the vault with tags for testing.
 		);
 
 		// Setup: テスト環境をセットアップ（APIモック含む）
-		await setupTestEnvironment(vault.window, PLUGIN_ID);
+		await setupTestEnvironment(atPage, PLUGIN_ID);
 
 		// Step 1: テストノートを作成
 		const testNotes = [
@@ -745,7 +738,7 @@ This note exists to populate the vault with tags for testing.
 		);
 
 		// Setup: テスト環境をセットアップ（APIモック含む）
-		await setupTestEnvironment(vault.window, PLUGIN_ID);
+		await setupTestEnvironment(atPage, PLUGIN_ID);
 
 		// Step 1: 3つのフォルダに分けてノートを作成
 		const session1Notes = Array.from({ length: 5 }, (_, i) => ({
@@ -889,8 +882,8 @@ This note exists to populate the vault with tags for testing.
 			vault.pluginHandleMap,
 		);
 
-		// Setup: テスト環境をセットアップ（APIモック含む）
-		await setupTestEnvironment(vault.window, PLUGIN_ID);
+		// Setup: テスト環境をセットアップ（APIモック含む、batchSize: 5）
+		await setupTestEnvironment(atPage, PLUGIN_ID, { batchSize: 5 });
 
 		// 15件のノートを作成（3バッチ分）
 		const testNotes = Array.from({ length: 15 }, (_, i) => ({
@@ -961,8 +954,8 @@ This note exists to populate the vault with tags for testing.
 			vault.pluginHandleMap,
 		);
 
-		// Setup: テスト環境をセットアップ（APIモック含む）
-		await setupTestEnvironment(vault.window, PLUGIN_ID);
+		// Setup: テスト環境をセットアップ（APIモック含む、ログ有効化）
+		await setupTestEnvironment(atPage, PLUGIN_ID, { enableLogging: true });
 
 		// テストノートを作成
 		const testNotes = Array.from({ length: 3 }, (_, i) => ({
@@ -986,15 +979,45 @@ This note exists to populate the vault with tags for testing.
 				f.path.startsWith("log-test/"),
 			);
 
+			console.log(`[TEST] Found ${targetNotes.length} notes to process`);
+			console.log(`[TEST] Logger enabled: ${autoTagger.logger.enabled}`);
+
 			await autoTagger.start(
 				targetNotes,
 				() => {},
 				() => {},
 			);
+			
+			console.log(`[TEST] AutoTagger finished`);
 		}, PLUGIN_ID);
+
+		// Obsidianがファイルシステム変更を認識するまで少し待つ
+		await vault.window.waitForTimeout(1000);
 
 		// ログファイルの存在を確認
 		const logPath = ".obsidian/plugins/auto-tagger/logs/auto-tag.log";
+		
+		// デバッグ: ファイルシステムの状態を確認
+		const debugInfo = await vault.window.evaluate(async (path: string) => {
+			const adapter = (window as any).app.vault.adapter;
+			const basePath = (adapter as any).basePath;
+			const exists = await adapter.exists(path);
+			
+			// logsディレクトリの存在も確認
+			const logsDir = ".obsidian/plugins/auto-tagger/logs";
+			const logsDirExists = await adapter.exists(logsDir);
+			
+			return {
+				basePath,
+				logPath: path,
+				exists,
+				logsDir,
+				logsDirExists
+			};
+		}, logPath);
+		
+		console.log("[TEST] Debug info:", debugInfo);
+		
 		const logExists = await atPage.fileExists(logPath);
 		expect(logExists).toBe(true);
 
